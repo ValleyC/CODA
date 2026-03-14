@@ -9,13 +9,26 @@ Per-frame streaming inference:
   5. NoteHead(P3, selected_bar_roi, z) -> sigmoid (cx,cy)
   6. Beam search with temporal priors -> best path
 
+Supports both normal (linear) and jump-augmented test data.
+For jump-augmented data, the NPZ contains a precomputed 'sequences' array
+that defines the (possibly non-linear) frame order with silence insertions.
+
 Usage:
+    # Normal tracking
     python scripts/evaluate.py \
         --param_path path/to/checkpoint.pt \
         --test_dir path/to/test_data \
         --test_piece piece_name
+
+    # Jump-augmented tracking
+    python scripts/evaluate.py \
+        --param_path path/to/checkpoint.pt \
+        --test_dir path/to/test_data \
+        --test_piece piece_name \
+        --break_mode
 """
 
+import os
 import cv2
 import torch
 import numpy as np
@@ -212,8 +225,21 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     piece_name = args.test_piece
+
+    # ── Load piece data ──────────────────────────────────────────────────
     org_scores, score, signal_np, systems, bars, interpol_fnc, pad, scale_factor, onsets = \
         load_piece_for_testing(args.test_dir, piece_name, args.scale_width)
+
+    # Check for precomputed sequences (jump-augmented data)
+    npz_path = os.path.join(args.test_dir, piece_name + '.npz')
+    npzfile = np.load(npz_path, allow_pickle=True)
+    has_sequences = 'sequences' in npzfile
+    if has_sequences:
+        sequences = list(npzfile['sequences'])
+        jump_metadata = list(npzfile['jump_metadata']) if 'jump_metadata' in npzfile else []
+        jump_output_indices = {int(j['output_idx']) for j in jump_metadata}
+        print(f"Jump-augmented mode: {len(sequences)} sequence entries, {len(jump_metadata)} jumps")
+    npzfile.close()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -258,14 +284,10 @@ if __name__ == '__main__':
     signal = torch.from_numpy(signal_np).to(device)
     score_tensor = torch.from_numpy(score).unsqueeze(1).to(device)
 
-    from_ = 0
-    to_ = FRAME_SIZE
     hidden = None
     observation_images = []
-    frame_idx = 0
     actual_page = 0
     track_page = args.page
-    start_ = None
     vis_spec = None
 
     # Audio buffer for cross-attention in SelectionHeadV2 (system and/or bar head)
@@ -277,185 +299,243 @@ if __name__ == '__main__':
 
     frame_diffs = []
     total_frames = 0
+    # For video audio track: collect signal chunks in playback order
+    audio_chunks = []
 
     network.reset_tracking_state()
 
-    pbar = tqdm(total=signal_np.shape[-1])
+    # ── Build frame iterator ─────────────────────────────────────────────
+    # For jump-augmented data: iterate through precomputed sequences
+    # For normal data: iterate linearly through audio frames
+    if has_sequences:
+        n_total = len(sequences)
+        C_JUMP = (0, 0, 255)  # red for jump indicators
 
-    while to_ <= signal_np.shape[-1]:
-        true_position = np.array(interpol_fnc(frame_idx), dtype=np.float32)
+        def iter_frames():
+            """Yield (audio_frame, true_position, is_silence, is_at_jump) per step."""
+            for seq_idx, seq in enumerate(sequences):
+                audio_frame = int(seq['frame'])
+                true_pos = np.array(seq['true_position'], dtype=np.float32)
+                is_silence = seq.get('is_silence', False)
+                is_at_jump = seq_idx in jump_output_indices
+                yield seq_idx, audio_frame, true_pos, is_silence, is_at_jump
+    else:
+        n_audio_frames = int(np.ceil(FPS * signal_np.shape[0] / SAMPLE_RATE))
+        n_total = n_audio_frames
+
+        def iter_frames():
+            """Yield (audio_frame, true_position, is_silence, is_at_jump) per step."""
+            for frame_idx in range(n_audio_frames):
+                from_sample = frame_idx * HOP_SIZE
+                to_sample = from_sample + FRAME_SIZE
+                if to_sample > signal_np.shape[-1]:
+                    break
+                true_pos = np.array(interpol_fnc(frame_idx), dtype=np.float32)
+                yield frame_idx, frame_idx, true_pos, False, False
+
+    pbar = tqdm(total=n_total)
+    prev_audio_frame = -1
+
+    for step_idx, audio_frame, true_position, is_silence, is_at_jump in iter_frames():
         actual_system = int(true_position[2])
         actual_bar = int(true_position[3])
+        new_page = int(true_position[-1])
 
-        if actual_page != int(true_position[-1]):
+        # ── State reset on page change ───────────────────────────────
+        if actual_page != new_page:
             hidden = None
             if hasattr(cond_net, 'reset_inference_state'):
                 cond_net.reset_inference_state()
             network.reset_tracking_state()
             audio_buffer.clear()
 
-        actual_page = int(true_position[-1])
+        # ── State reset at jump points (silence onset) ───────────────
+        if is_at_jump:
+            hidden = None
+            if hasattr(cond_net, 'reset_inference_state'):
+                cond_net.reset_inference_state()
+            network.reset_tracking_state()
+            audio_buffer.clear()
+
+        actual_page = new_page
         system = systems[actual_system]
         bar = bars[actual_bar]
         true_position_xy = true_position[:2]
 
-        if track_page is None or actual_page == track_page:
-            start_ = from_ if start_ is None else start_
+        # ── Compute audio boundaries ─────────────────────────────────
+        from_ = audio_frame * HOP_SIZE
+        to_ = from_ + FRAME_SIZE
 
-            # Update break mode using waveform RMS (no GPU->CPU sync needed)
+        if track_page is not None and actual_page != track_page:
+            pbar.update(1)
+            continue
+
+        # ── Feed audio / silence to model ────────────────────────────
+        if is_silence or audio_frame < 0 or to_ > signal_np.shape[-1]:
+            # Silence frame: zero audio
+            sig_excerpt = torch.zeros(FRAME_SIZE, device=device)
+            raw_audio = np.zeros(HOP_SIZE, dtype=np.float32)
+            break_diag = network.update_break_mode(np.zeros(FRAME_SIZE))
+        else:
+            sig_excerpt = signal[from_:to_]
+            raw_audio = signal_np[from_:from_ + HOP_SIZE]
             break_diag = network.update_break_mode(signal_np[from_:to_])
 
-            with torch.no_grad():
-                sig_excerpt = signal[from_:to_]
-                spec_frame = network.compute_spec([sig_excerpt], tempo_aug=False)[0]
-                z, hidden = cond_net.get_conditioning(spec_frame, hidden=hidden)
+        audio_chunks.append(raw_audio)
 
-                # Buffer Mamba output for cross-attention
-                if hasattr(cond_net, 'get_cached_output'):
-                    mamba_out = cond_net.get_cached_output()
-                    if mamba_out is not None:
-                        audio_buffer.append(mamba_out.squeeze(0))
+        with torch.no_grad():
+            spec_frame = network.compute_spec([sig_excerpt], tempo_aug=False)[0]
+            z, hidden = cond_net.get_conditioning(spec_frame, hidden=hidden)
 
-                # Build audio_seq from buffer
-                if len(audio_buffer) > 0:
-                    audio_seq = torch.stack(list(audio_buffer), dim=0).unsqueeze(0)  # [1, T, 64]
-                    audio_seq = audio_seq.to(device=device, dtype=z.dtype)
-                    audio_lengths = torch.tensor([len(audio_buffer)], device=device)
-                else:
-                    audio_seq = None
-                    audio_lengths = None
+            # Buffer Mamba output for cross-attention
+            if hasattr(cond_net, 'get_cached_output'):
+                mamba_out = cond_net.get_cached_output()
+                if mamba_out is not None:
+                    audio_buffer.append(mamba_out.squeeze(0))
 
-                p3, _ = network.backbone(
-                    score_tensor[actual_page:actual_page + 1], z
+            # Build audio_seq from buffer
+            if len(audio_buffer) > 0:
+                audio_seq = torch.stack(list(audio_buffer), dim=0).unsqueeze(0)
+                audio_seq = audio_seq.to(device=device, dtype=z.dtype)
+                audio_lengths = torch.tensor([len(audio_buffer)], device=device)
+            else:
+                audio_seq = None
+                audio_lengths = None
+
+            p3, _ = network.backbone(
+                score_tensor[actual_page:actual_page + 1], z
+            )
+
+            # Get page metadata scaled to model input space
+            pm = page_meta.get(actual_page)
+            if pm is not None:
+                sys_boxes = torch.from_numpy(pm['system_boxes'] / scale_factor).to(device)
+                bar_boxes = torch.from_numpy(pm['bar_boxes'] / scale_factor).to(device)
+                bps = pm['bars_per_system']
+
+                result = network.inference_forward(
+                    p3, z, sys_boxes, bar_boxes, bps,
+                    audio_seq=audio_seq, audio_lengths=audio_lengths,
                 )
+            else:
+                result = None
 
-                # Get page metadata scaled to model input space
-                pm = page_meta.get(actual_page)
-                if pm is not None:
-                    sys_boxes = torch.from_numpy(pm['system_boxes'] / scale_factor).to(device)
-                    bar_boxes = torch.from_numpy(pm['bar_boxes'] / scale_factor).to(device)
-                    bps = pm['bars_per_system']
+        # ── Visualization ────────────────────────────────────────────
+        center_y, center_x = true_position_xy
+        gt_x = center_x - pad
+        gt_y = center_y
 
-                    result = network.inference_forward(
-                        p3, z, sys_boxes, bar_boxes, bps,
-                        audio_seq=audio_seq, audio_lengths=audio_lengths,
-                    )
-                else:
-                    result = None
+        # Start from clean score image (uint8 BGR)
+        img = (cv2.cvtColor(org_scores[actual_page], cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
 
-            # ── Visualization ────────────────────────────────────────────
-            center_y, center_x = true_position_xy
-            gt_x = center_x - pad
-            gt_y = center_y
+        # System extent for cursor lines
+        s = system
+        sys_y1 = s['y'] - s['h'] / 2
+        sys_y2 = s['y'] + s['h'] / 2
 
-            # Start from clean score image (uint8 BGR)
-            img = (cv2.cvtColor(org_scores[actual_page], cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
+        # -- GT system box (semi-transparent) --
+        sx1 = s['x'] - s['w'] / 2 - pad
+        sx2 = s['x'] + s['w'] / 2 - pad
+        overlay_box(img, sx1, sys_y1, sx2, sys_y2, C_GT_SYS, alpha=0.06,
+                    border_thickness=1, label="GT System")
 
-            # System extent for cursor lines
-            s = system
-            sys_y1 = s['y'] - s['h'] / 2
-            sys_y2 = s['y'] + s['h'] / 2
+        # -- GT bar box (semi-transparent) --
+        b = bar
+        bx1, by1 = b['x'] - b['w'] / 2 - pad, b['y'] - b['h'] / 2
+        bx2, by2 = b['x'] + b['w'] / 2 - pad, b['y'] + b['h'] / 2
+        overlay_box(img, bx1, by1, bx2, by2, C_GT_BAR, alpha=0.10,
+                    border_thickness=1, label="GT Bar")
 
-            # -- GT system box (semi-transparent) --
-            sx1 = s['x'] - s['w'] / 2 - pad
-            sx2 = s['x'] + s['w'] / 2 - pad
-            overlay_box(img, sx1, sys_y1, sx2, sys_y2, C_GT_SYS, alpha=0.06,
-                        border_thickness=1, label="GT System")
+        # -- GT cursor: vertical line + glowing dot --
+        draw_cursor(img, gt_x, sys_y1, sys_y2, C_GT, dot_cy=gt_y,
+                    radius=5, label="GT")
 
-            # -- GT bar box (semi-transparent) --
-            b = bar
-            bx1, by1 = b['x'] - b['w'] / 2 - pad, b['y'] - b['h'] / 2
-            bx2, by2 = b['x'] + b['w'] / 2 - pad, b['y'] + b['h'] / 2
-            overlay_box(img, bx1, by1, bx2, by2, C_GT_BAR, alpha=0.10,
-                        border_thickness=1, label="GT Bar")
+        # -- Jump/silence indicator --
+        if has_sequences and is_silence:
+            cv2.putText(img, "SILENCE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, C_JUMP, 2, cv2.LINE_AA)
+        if has_sequences and is_at_jump:
+            cv2.putText(img, "JUMP", (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, C_JUMP, 2, cv2.LINE_AA)
 
-            # -- GT cursor: vertical line + glowing dot --
-            draw_cursor(img, gt_x, sys_y1, sys_y2, C_GT, dot_cy=gt_y,
-                        radius=5, label="GT")
+        if result is not None:
+            pred_x = result['note_page_x'] * scale_factor - pad
+            pred_y = result['note_page_y'] * scale_factor
+            best = result['best_path']
 
-            if result is not None:
-                pred_x = result['note_page_x'] * scale_factor - pad
-                pred_y = result['note_page_y'] * scale_factor
-                best = result['best_path']
+            # -- Predicted system box --
+            sys_idx = best['system_idx']
+            pred_sys_y1, pred_sys_y2 = sys_y1, sys_y2  # fallback
+            if sys_idx < pm['system_boxes'].shape[0]:
+                sb = pm['system_boxes'][sys_idx]
+                psx1 = sb[0] - sb[2] / 2 - pad
+                psy1 = sb[1] - sb[3] / 2
+                psx2 = sb[0] + sb[2] / 2 - pad
+                psy2 = sb[1] + sb[3] / 2
+                pred_sys_y1, pred_sys_y2 = psy1, psy2
+                overlay_box(img, psx1, psy1, psx2, psy2, C_PRED_SYS, alpha=0.08,
+                            border_thickness=2,
+                            label=f"Pred Sys {sys_idx} ({best['sys_lp']:.1f})")
 
-                # -- Predicted system box --
-                sys_idx = best['system_idx']
-                pred_sys_y1, pred_sys_y2 = sys_y1, sys_y2  # fallback
-                if sys_idx < pm['system_boxes'].shape[0]:
-                    sb = pm['system_boxes'][sys_idx]
-                    psx1 = sb[0] - sb[2] / 2 - pad
-                    psy1 = sb[1] - sb[3] / 2
-                    psx2 = sb[0] + sb[2] / 2 - pad
-                    psy2 = sb[1] + sb[3] / 2
-                    pred_sys_y1, pred_sys_y2 = psy1, psy2
-                    overlay_box(img, psx1, psy1, psx2, psy2, C_PRED_SYS, alpha=0.08,
-                                border_thickness=2,
-                                label=f"Pred Sys {sys_idx} ({best['sys_lp']:.1f})")
+            # -- Predicted bar box --
+            bar_page_idx = best['bar_page_idx']
+            if bar_page_idx < pm['bar_boxes'].shape[0]:
+                bb = pm['bar_boxes'][bar_page_idx]
+                pbx1 = bb[0] - bb[2] / 2 - pad
+                pby1 = bb[1] - bb[3] / 2
+                pbx2 = bb[0] + bb[2] / 2 - pad
+                pby2 = bb[1] + bb[3] / 2
+                overlay_box(img, pbx1, pby1, pbx2, pby2, C_PRED_BAR, alpha=0.10,
+                            border_thickness=2,
+                            label=f"Pred Bar {bar_page_idx} ({best['bar_lp']:.1f})")
 
-                # -- Predicted bar box --
-                bar_page_idx = best['bar_page_idx']
-                if bar_page_idx < pm['bar_boxes'].shape[0]:
-                    bb = pm['bar_boxes'][bar_page_idx]
-                    pbx1 = bb[0] - bb[2] / 2 - pad
-                    pby1 = bb[1] - bb[3] / 2
-                    pbx2 = bb[0] + bb[2] / 2 - pad
-                    pby2 = bb[1] + bb[3] / 2
-                    overlay_box(img, pbx1, pby1, pbx2, pby2, C_PRED_BAR, alpha=0.10,
-                                border_thickness=2,
-                                label=f"Pred Bar {bar_page_idx} ({best['bar_lp']:.1f})")
+            # -- Predicted cursor: vertical line + glowing dot --
+            draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
+                        dot_cy=pred_y, radius=7, label="Pred")
 
-                # -- Predicted cursor: vertical line + glowing dot --
-                draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
-                            dot_cy=pred_y, radius=7, label="Pred")
-
-                # -- Compute error --
+            # -- Compute error (skip silence frames) --
+            if not is_silence:
                 frame_diff = np.sqrt((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2)
                 frame_diffs.append(frame_diff)
                 total_frames += 1
 
-                # -- Info panel --
-                info = {
-                    'System': f"{sys_idx} (lp={best['sys_lp']:.2f})",
-                    'Bar': f"{bar_page_idx} (lp={best['bar_lp']:.2f})",
-                    'Error': f"{frame_diff:.1f} px",
-                    'Mean Err': f"{np.mean(frame_diffs):.1f} px",
-                    'Frame': f"{total_frames}",
-                }
-                # Break mode diagnostics
-                if network.break_mode_enabled:
-                    ne = break_diag['norm_energy']
-                    ne_str = 'warmup' if ne < 0 else f"{ne:.2f}"
-                    brk_status = 'SILENCE' if break_diag['in_silence'] else (
-                        f"GRACE({break_diag['grace_frames_remaining']})"
-                        if break_diag['is_break_mode'] else 'off')
-                    info['Break'] = brk_status
-                    info['Energy'] = ne_str
-                draw_info_panel(img, info)
+            # -- Info panel --
+            info = {
+                'System': f"{sys_idx} (lp={best['sys_lp']:.2f})",
+                'Bar': f"{bar_page_idx} (lp={best['bar_lp']:.2f})",
+                'Error': f"{frame_diff:.1f} px" if not is_silence else "—",
+                'Mean Err': f"{np.mean(frame_diffs):.1f} px" if frame_diffs else "—",
+                'Frame': f"{total_frames}",
+            }
+            # Break mode diagnostics
+            if network.break_mode_enabled:
+                ne = break_diag['norm_energy']
+                ne_str = 'warmup' if ne < 0 else f"{ne:.2f}"
+                brk_status = 'SILENCE' if break_diag['in_silence'] else (
+                    f"GRACE({break_diag['grace_frames_remaining']})"
+                    if break_diag['is_break_mode'] else 'off')
+                info['Break'] = brk_status
+                info['Energy'] = ne_str
+            draw_info_panel(img, info)
 
-            # -- Rolling spectrogram side panel --
-            if vis_spec is not None:
-                vis_spec = np.roll(vis_spec, -1, axis=1)
-            else:
-                vis_spec = np.zeros((spec_frame.shape[-1], 60))
-            vis_spec[:, -1] = spec_frame[0].cpu().numpy()
-
-            spec_panel = prepare_spec_panel(vis_spec, img.shape[0], width=220)
-            spec_panel = (spec_panel * 255).astype(np.uint8)
-            img = np.concatenate((img, spec_panel), axis=1)
-
-            if args.plot:
-                cv2.imshow('Selection Prediction', img)
-                cv2.waitKey(20)
-
-            observation_images.append(img)
+        # -- Rolling spectrogram side panel --
+        if vis_spec is not None:
+            vis_spec = np.roll(vis_spec, -1, axis=1)
         else:
-            if start_ is not None:
-                break
+            vis_spec = np.zeros((spec_frame.shape[-1], 60))
+        vis_spec[:, -1] = spec_frame[0].cpu().numpy()
 
-        from_ += HOP_SIZE
-        to_ += HOP_SIZE
-        frame_idx += 1
-        pbar.update(HOP_SIZE)
+        spec_panel = prepare_spec_panel(vis_spec, img.shape[0], width=220)
+        spec_panel = (spec_panel * 255).astype(np.uint8)
+        img = np.concatenate((img, spec_panel), axis=1)
+
+        if args.plot:
+            cv2.imshow('Selection Prediction', img)
+            cv2.waitKey(20)
+
+        observation_images.append(img)
+        prev_audio_frame = audio_frame
+        pbar.update(1)
 
     pbar.close()
 
@@ -468,10 +548,19 @@ if __name__ == '__main__':
         print(f"  Mean frame diff: {np.mean(frame_diffs):.2f} px")
         print(f"  Median frame diff: {np.median(frame_diffs):.2f} px")
         print(f"  Total frames: {total_frames}")
+        if has_sequences:
+            print(f"  Jumps: {len(jump_metadata)}")
         print(f"{'='*50}")
 
-    truncated_signal = signal_np[start_:to_]
+    # Build audio track from collected chunks
+    if audio_chunks:
+        video_signal = np.concatenate(audio_chunks)
+    else:
+        video_signal = signal_np
+
     tag = "_selection" if args.page is None else f"_{args.page}_selection"
-    create_video(observation_images, truncated_signal, piece_name, FPS, SAMPLE_RATE,
+    if has_sequences:
+        tag = "_jump" + tag
+    create_video(observation_images, video_signal, piece_name, FPS, SAMPLE_RATE,
                  tag=tag, path=args.output_dir)
     print(f"Video saved to {args.output_dir}/{piece_name}{tag}.mp4")
