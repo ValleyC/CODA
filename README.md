@@ -22,6 +22,7 @@ Beam search with learned temporal priors decodes the cascade over time. A silenc
 conda create -n coda python=3.10
 conda activate coda
 pip install -r requirements.txt
+pip install -e .
 ```
 
 For Mamba SSM support (recommended):
