@@ -19,26 +19,13 @@ Beam search with learned temporal priors decodes the cascade over time. A silenc
 ### Environment Setup
 
 ```bash
-# 1. Create conda environment
 conda create -n coda python=3.10
 conda activate coda
-
-# 2. Install PyTorch with CUDA (adjust cu121 to match your CUDA version)
-pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu121
-
-# 3. Install Mamba SSM (requires torch+CUDA)
-pip install causal-conv1d>=1.2.0
-pip install mamba-ssm>=1.0
-
-# 4. Install cython (needed to build madmom from source)
-pip install cython
-
-# 5. Install remaining dependencies
 pip install -r requirements.txt
-
-# 6. Install CODA package
 pip install -e .
 ```
+
+> **Note:** `requirements.txt` pins PyTorch to CUDA 12.1. If you need a different CUDA version, edit the `--extra-index-url` line (e.g., replace `cu121` with `cu118`).
 - tensorboard
 
 ## Data Preparation
