@@ -26,13 +26,6 @@ if [ ! -d "msmd" ]; then
 fi
 cd ..
 
-echo "=== Generating jump-augmented training data ==="
-python scripts/generate_jump_data.py \
-    --input_dir data/msmd/msmd_train \
-    --output_dir data/msmd/msmd_train_jump \
-    --num_variants 3 \
-    --seed 42
-
 # ============================================================
 # 3. Training Phase 1: Ground-truth routing
 # ============================================================
@@ -88,6 +81,28 @@ for piece in data/msmd/msmd_test/*.npz; do
         --test_dir data/msmd/msmd_test \
         --test_piece ${piece_name} \
         --output_dir results/
+done
+
+# ============================================================
+# 6. Jump Recovery Evaluation
+# ============================================================
+echo "=== Generating jump-augmented test data ==="
+python scripts/generate_jump_data.py \
+    --input_dir data/msmd/msmd_test \
+    --output_dir data/msmd/msmd_test_jump \
+    --num_variants 3 \
+    --seed 42
+
+echo "=== Evaluating jump recovery ==="
+for piece in data/msmd/msmd_test_jump/*.npz; do
+    piece_name=$(basename "$piece" .npz)
+    echo "Evaluating (jump): ${piece_name}"
+    python scripts/evaluate.py \
+        --param_path ${PHASE2_DIR}/best_model.pt \
+        --test_dir data/msmd/msmd_test_jump \
+        --test_piece ${piece_name} \
+        --break_mode \
+        --output_dir results/jump/
 done
 
 echo "=== Done! Results saved to results/ ==="
