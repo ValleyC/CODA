@@ -1,0 +1,1353 @@
+{
+  "_description": "Repeat structure annotations for MSMD test pieces. performance_order lists bar index ranges [start, end] (inclusive, 0-indexed) in the order a performer would play them. Where consecutive segments go backward, a jump (with silence) is inserted.",
+  "AndreJ__O34__andre-sonatine_synth": {
+    "bars": 62,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "Anonymous__lanative__lanative_synth": {
+    "bars": 17,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV1006a__bwv-1006a_5_synth": {
+    "bars": 32,
+    "has_repeats": false
+  },
+  "BachJS__BWV117a__BWV-117a_synth": {
+    "bars": 16,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV511__BWV-511_synth": {
+    "bars": 12,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        6,
+        11
+      ],
+      [
+        6,
+        11
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Notebook piece - verify"
+  },
+  "BachJS__BWV512__BWV-512_synth": {
+    "bars": 12,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        6,
+        11
+      ],
+      [
+        6,
+        11
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Notebook piece - verify"
+  },
+  "BachJS__BWV516__BWV-516_synth": {
+    "bars": 18,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        8
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9,
+        17
+      ],
+      [
+        9,
+        17
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Notebook piece - verify"
+  },
+  "BachJS__BWV775__bach-invention-04_synth": {
+    "bars": 52,
+    "has_repeats": false
+  },
+  "BachJS__BWV779__bach-invention-08_synth": {
+    "bars": 34,
+    "has_repeats": false
+  },
+  "BachJS__BWV781__bach-invention-10_synth": {
+    "bars": 32,
+    "has_repeats": false
+  },
+  "BachJS__BWV797__bwv797_synth": {
+    "bars": 72,
+    "has_repeats": false
+  },
+  "BachJS__BWV817__bach-french-suite-6-menuet_synth": {
+    "bars": 24,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        23
+      ],
+      [
+        8,
+        23
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Confirm bar split at 8"
+  },
+  "BachJS__BWV825__15title-hub_synth": {
+    "bars": 56,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV825__16title-hub_synth": {
+    "bars": 48,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV829__55title-hub_synth": {
+    "bars": 52,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV830__BWV-830-2_synth": {
+    "bars": 22,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWV856__BWV856_Fugue11_synth": {
+    "bars": 73,
+    "has_repeats": false
+  },
+  "BachJS__BWV924a__bach-prelude-bwv924a_synth": {
+    "bars": 14,
+    "has_repeats": false
+  },
+  "BachJS__BWV988__bwv-988-v09_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ]
+  },
+  "BachJS__BWV988__bwv-988-v12_synth": {
+    "bars": 32,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        15
+      ],
+      [
+        0,
+        15
+      ],
+      [
+        16,
+        31
+      ],
+      [
+        16,
+        31
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Standard Goldberg binary"
+  },
+  "BachJS__BWV988__bwv-988-v13_synth": {
+    "bars": 32,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        15
+      ],
+      [
+        0,
+        15
+      ],
+      [
+        16,
+        31
+      ],
+      [
+        16,
+        31
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Standard Goldberg binary"
+  },
+  "BachJS__BWV994__bach-applicatio_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ]
+  },
+  "BachJS__BWVAnh113__anna-magdalena-03_synth": {
+    "bars": 32,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        15
+      ],
+      [
+        0,
+        15
+      ],
+      [
+        16,
+        31
+      ],
+      [
+        16,
+        31
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Notebook piece - verify"
+  },
+  "BachJS__BWVAnh116__anna-magdalena-07_synth": {
+    "bars": 40,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        15
+      ],
+      [
+        0,
+        15
+      ],
+      [
+        16,
+        39
+      ],
+      [
+        16,
+        39
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Confirm bar split"
+  },
+  "BachJS__BWVAnh120__BWV-120_synth": {
+    "bars": 30,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        14
+      ],
+      [
+        0,
+        14
+      ],
+      [
+        15,
+        29
+      ],
+      [
+        15,
+        29
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Notebook piece - verify"
+  },
+  "BachJS__BWVAnh131__air_synth": {
+    "bars": 17,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BachJS__BWVAnh691__BWV-691_synth": {
+    "bars": 10,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BartokB__rom_folk_dance_1_bartok__rom_folk_dance_1_bartok_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance"
+  },
+  "BeethovenLv__O79__LVB_Sonate_79_1_synth": {
+    "bars": 206,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BurgmullerJFF__O100__25EF-02_synth": {
+    "bars": 33,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BurgmullerJFF__O100__25EF-08_synth": {
+    "bars": 16,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "BurgmullerJFF__O100__25EF-14_synth": {
+    "bars": 40,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "ChopinFF__O28__Chop-28-11_synth": {
+    "bars": 27,
+    "has_repeats": false
+  },
+  "ChopinFF__O28__Chop-28-9_synth": {
+    "bars": 12,
+    "has_repeats": false
+  },
+  "ChopinFF__O9__nocturne_in_b-flat_minor_synth": {
+    "bars": 86,
+    "has_repeats": false
+  },
+  "CzernyC__Op_821__Czerny_Op_821_No_004_synth": {
+    "bars": 8,
+    "has_repeats": false
+  },
+  "CzernyC__Op_821__Czerny_Op_821_No_008_synth": {
+    "bars": 8,
+    "has_repeats": false
+  },
+  "CzernyC__Op_821__Czerny_Op_821_No_009_synth": {
+    "bars": 8,
+    "has_repeats": false
+  },
+  "CzernyC__Op_821__Czerny_Op_821_No_014_synth": {
+    "bars": 16,
+    "has_repeats": false
+  },
+  "CzernyC__Op_821__Czerny_Op_821_No_015_synth": {
+    "bars": 8,
+    "has_repeats": false
+  },
+  "HandelGF__Aylesford__07-concerto_synth": {
+    "bars": 38,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "HandelGF__Aylesford__10-menuetii_synth": {
+    "bars": 26,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "HandelGF__Aylesford__16-airmitvar_synth": {
+    "bars": 43,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "HandelGF__Aylesford__19-menuet_synth": {
+    "bars": 24,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        23
+      ],
+      [
+        8,
+        23
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Confirm bar split"
+  },
+  "Kruetzer__lodiska__lodiska_synth": {
+    "bars": 27,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "MozartWA__KV331__KV331_1_2_var1_synth": {
+    "bars": 18,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        8
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9,
+        17
+      ],
+      [
+        9,
+        17
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Confirm bar split at 9"
+  },
+  "MozartWA__KV331__KV331_1_5_var4_synth": {
+    "bars": 18,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        8
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9,
+        17
+      ],
+      [
+        9,
+        17
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Same form as Var 1"
+  },
+  "MuellerAE__muller-siciliano__muller-siciliano_synth": {
+    "bars": 22,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "MussorgskyM__pictures-at-an-exhibition__catacombae_synth": {
+    "bars": 30,
+    "has_repeats": false
+  },
+  "MussorgskyM__pictures-at-an-exhibition__promenade-3_synth": {
+    "bars": 8,
+    "has_repeats": false
+  },
+  "MussorgskyM__pictures-at-an-exhibition__promenade-5_synth": {
+    "bars": 25,
+    "has_repeats": false
+  },
+  "SatieE__gymnopedie_1__gymnopedie_1_synth": {
+    "bars": 47,
+    "has_repeats": false
+  },
+  "SatieE__gymnopedie_3__gymnopedie_3_synth": {
+    "bars": 60,
+    "has_repeats": false
+  },
+  "SchumannR__O68__schumann-op68-01-melodie_synth": {
+    "bars": 20,
+    "has_repeats": true,
+    "repeat_type": "first_half",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        19
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Only first section repeats"
+  },
+  "SchumannR__O68__schumann-op68-04-choral_synth": {
+    "bars": 32,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "SchumannR__O68__schumann-op68-06-pauvre-orpheline_synth": {
+    "bars": 22,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "SchumannR__O68__schumann-op68-08-cavalier-sauvage_synth": {
+    "bars": 27,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "SchumannR__O68__schumann-op68-09-chanson-populaire_synth": {
+    "bars": 24,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "SchumannR__O68__schumann-op68-16-premier-chagrin_synth": {
+    "bars": 34,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "SchumannR__O68__schumann-op68-26-sans-titre_synth": {
+    "bars": 24,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Schumann Album - check for repeats"
+  },
+  "ScriabinA__O16__scriabine-op16-no5_synth": {
+    "bars": 24,
+    "has_repeats": false
+  },
+  "SidwellA__little-toy-lost__little-toy-lost_synth": {
+    "bars": 11,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "StraussJJ__O314__blue_danube_synth": {
+    "bars": 34,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "TchaikovskyPI__O39__01MorningPrayer_synth": {
+    "bars": 24,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "TchaikovskyPI__O39__16OldFrenchSong_synth": {
+    "bars": 33,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.12__traditioner_af_swenska_folk_dansar.1.12_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Confirm bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.14__traditioner_af_swenska_folk_dansar.1.14_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.19__traditioner_af_swenska_folk_dansar.1.19_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.20__traditioner_af_swenska_folk_dansar.1.20_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.22__traditioner_af_swenska_folk_dansar.1.22_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.26__traditioner_af_swenska_folk_dansar.1.26_synth": {
+    "bars": 9,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        8
+      ],
+      [
+        4,
+        8
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.29__traditioner_af_swenska_folk_dansar.1.29_synth": {
+    "bars": 14,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        6
+      ],
+      [
+        0,
+        6
+      ],
+      [
+        7,
+        13
+      ],
+      [
+        7,
+        13
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.2__traditioner_af_swenska_folk_dansar.1.2_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.30__traditioner_af_swenska_folk_dansar.1.30_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.3__traditioner_af_swenska_folk_dansar.1.3_synth": {
+    "bars": 14,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        6
+      ],
+      [
+        0,
+        6
+      ],
+      [
+        7,
+        13
+      ],
+      [
+        7,
+        13
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.4__traditioner_af_swenska_folk_dansar.1.4_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.5__traditioner_af_swenska_folk_dansar.1.5_synth": {
+    "bars": 10,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        5,
+        9
+      ],
+      [
+        5,
+        9
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.1.6__traditioner_af_swenska_folk_dansar.1.6_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.2.27__traditioner_af_swenska_folk_dansar.2.27_synth": {
+    "bars": 12,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        6,
+        11
+      ],
+      [
+        6,
+        11
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.2.36__traditioner_af_swenska_folk_dansar.2.36_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.12__traditioner_af_swenska_folk_dansar.3.12_synth": {
+    "bars": 18,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        8
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9,
+        17
+      ],
+      [
+        9,
+        17
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.13__traditioner_af_swenska_folk_dansar.3.13_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.14__traditioner_af_swenska_folk_dansar.3.14_synth": {
+    "bars": 20,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        9
+      ],
+      [
+        0,
+        9
+      ],
+      [
+        10,
+        19
+      ],
+      [
+        10,
+        19
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.17__traditioner_af_swenska_folk_dansar.3.17_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.18__traditioner_af_swenska_folk_dansar.3.18_synth": {
+    "bars": 16,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        8,
+        15
+      ],
+      [
+        8,
+        15
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.19__traditioner_af_swenska_folk_dansar.3.19_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.22__traditioner_af_swenska_folk_dansar.3.22_synth": {
+    "bars": 20,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        9
+      ],
+      [
+        0,
+        9
+      ],
+      [
+        10,
+        19
+      ],
+      [
+        10,
+        19
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.24__traditioner_af_swenska_folk_dansar.3.24_synth": {
+    "bars": 20,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        9
+      ],
+      [
+        0,
+        9
+      ],
+      [
+        10,
+        19
+      ],
+      [
+        10,
+        19
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.34__traditioner_af_swenska_folk_dansar.3.34_synth": {
+    "bars": 14,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        6
+      ],
+      [
+        0,
+        6
+      ],
+      [
+        7,
+        13
+      ],
+      [
+        7,
+        13
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.6__traditioner_af_swenska_folk_dansar.3.6_synth": {
+    "bars": 13,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        6,
+        12
+      ],
+      [
+        6,
+        12
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.7__traditioner_af_swenska_folk_dansar.3.7_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.8__traditioner_af_swenska_folk_dansar.3.8_synth": {
+    "bars": 19,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        8
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9,
+        18
+      ],
+      [
+        9,
+        18
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Traditional__traditioner_af_swenska_folk_dansar.3.9__traditioner_af_swenska_folk_dansar.3.9_synth": {
+    "bars": 7,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        3,
+        6
+      ],
+      [
+        3,
+        6
+      ]
+    ],
+    "needs_review": true,
+    "_note": "Folk dance - verify bar split"
+  },
+  "Yaniewicz__leslanciers__leslanciers_synth": {
+    "bars": 18,
+    "has_repeats": false,
+    "needs_review": true,
+    "_note": "Check score image for repeat signs"
+  }
+}

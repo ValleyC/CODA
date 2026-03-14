@@ -72,15 +72,22 @@ data/
       ...
 ```
 
-### Jump-Augmented Test Set
+### Repeat-Aware Jump-Augmented Test Set
 
-Generate jump-augmented variants for jump recovery evaluation (Section 4.4 in the paper):
+Generate the jump-augmented test benchmark for discontinuity recovery evaluation. Pieces with written repeats (repeat barlines, da capo, etc.) follow their actual repeat structure; pieces without repeats receive random jumps.
+
 ```bash
-python scripts/generate_jump_data.py \
+python scripts/generate_repeat_test.py \
     --input_dir data/msmd/msmd_test \
     --output_dir data/msmd/msmd_test_jump \
-    --num_variants 3
+    --annotations data/repeat_annotations.json
 ```
+
+This produces two subsets under `msmd_test_jump/`:
+- `repeat/` — pieces with real repeat structures (jumps follow annotated performance order)
+- `random/` — pieces without repeats (random jumps inserted)
+
+See `data/repeat_annotations.json` for the per-piece repeat structure annotations.
 
 ## Training
 
@@ -132,10 +139,11 @@ python scripts/evaluate.py \
 
 ### With Break Mode (Jump Recovery)
 
+Evaluate on the repeat-aware jump-augmented test set:
 ```bash
 python scripts/evaluate.py \
     --param_path params/<phase2_dir>/best_model.pt \
-    --test_dir data/msmd/msmd_test \
+    --test_dir data/msmd/msmd_test_jump/repeat \
     --test_piece PieceName \
     --break_mode
 ```

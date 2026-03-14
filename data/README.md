@@ -35,12 +35,35 @@ Each `.npz` file contains:
 - `systems`: System bounding boxes (list of dicts with `x, y, w, h, page_nr`)
 - `synthesized`: Boolean flag indicating synthesized audio
 
-### Jump-Augmented Test Set
+### Repeat-Aware Jump-Augmented Test Set
 
-Generate jump-augmented variants for jump recovery evaluation:
+Generate the jump-augmented test benchmark for discontinuity recovery evaluation:
 ```bash
-python scripts/generate_jump_data.py \
+python scripts/generate_repeat_test.py \
     --input_dir data/msmd/msmd_test \
     --output_dir data/msmd/msmd_test_jump \
-    --num_variants 3
+    --annotations data/repeat_annotations.json
+```
+
+This produces two subsets:
+- `repeat/` — pieces with written repeats, jumps follow annotated performance order
+- `random/` — pieces without repeats, random jumps inserted
+
+### Repeat Annotations (`repeat_annotations.json`)
+
+Per-piece annotations for the 94 MSMD test pieces. Each entry contains:
+- `has_repeats`: Whether the piece has written repeat structures
+- `repeat_type`: Type of repeat (`"binary"`, `"first_half"`, `"da_capo"`, `"ternary"`)
+- `performance_order`: List of `[start_bar, end_bar]` segments (inclusive, 0-indexed) in the order a performer would play them
+
+Example:
+```json
+{
+  "BachJS__BWV994__bach-applicatio_synth": {
+    "bars": 8,
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [[0, 3], [0, 3], [4, 7], [4, 7]]
+  }
+}
 ```

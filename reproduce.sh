@@ -86,23 +86,35 @@ done
 # ============================================================
 # 6. Jump Recovery Evaluation
 # ============================================================
-echo "=== Generating jump-augmented test data ==="
-python scripts/generate_jump_data.py \
+echo "=== Generating repeat-aware jump-augmented test data ==="
+python scripts/generate_repeat_test.py \
     --input_dir data/msmd/msmd_test \
     --output_dir data/msmd/msmd_test_jump \
-    --num_variants 3 \
+    --annotations data/repeat_annotations.json \
     --seed 42
 
-echo "=== Evaluating jump recovery ==="
-for piece in data/msmd/msmd_test_jump/*.npz; do
+echo "=== Evaluating jump recovery (repeat subset) ==="
+for piece in data/msmd/msmd_test_jump/repeat/*.npz; do
     piece_name=$(basename "$piece" .npz)
-    echo "Evaluating (jump): ${piece_name}"
+    echo "Evaluating (repeat): ${piece_name}"
     python scripts/evaluate.py \
         --param_path ${PHASE2_DIR}/best_model.pt \
-        --test_dir data/msmd/msmd_test_jump \
+        --test_dir data/msmd/msmd_test_jump/repeat \
         --test_piece ${piece_name} \
         --break_mode \
-        --output_dir results/jump/
+        --output_dir results/jump_repeat/
+done
+
+echo "=== Evaluating jump recovery (random subset) ==="
+for piece in data/msmd/msmd_test_jump/random/*.npz; do
+    piece_name=$(basename "$piece" .npz)
+    echo "Evaluating (random): ${piece_name}"
+    python scripts/evaluate.py \
+        --param_path ${PHASE2_DIR}/best_model.pt \
+        --test_dir data/msmd/msmd_test_jump/random \
+        --test_piece ${piece_name} \
+        --break_mode \
+        --output_dir results/jump_random/
 done
 
 echo "=== Done! Results saved to results/ ==="
