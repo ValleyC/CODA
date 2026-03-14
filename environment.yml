@@ -22,6 +22,7 @@ dependencies:
     - soundfile==0.13.1
     - tensorboard==2.20.0
     - matplotlib==3.10.8
+    - transformers==4.40.0
     # mamba-ssm is intentionally omitted here.
     # Its prebuilt wheels often mismatch the local PyTorch ABI.
     # Install it from source after activating the environment:

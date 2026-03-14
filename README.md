@@ -27,7 +27,7 @@ bash install.sh
 > **Tested setup:** Linux, Python 3.10, CUDA 12.1, PyTorch 2.2.0, `mamba-ssm` 2.2.2, `madmom` 0.17.dev0.
 >
 > **Why `install.sh` is required:** `mamba-ssm` prebuilt wheels often mismatch the local PyTorch ABI. The script builds `mamba-ssm` from source against the active PyTorch installation.
-> It also avoids pulling unnecessary language-model dependencies from `mamba-ssm` that CODA does not use.
+> CODA also pins a compatible `transformers` version because `mamba-ssm` imports it at package initialization time, even though CODA only uses the Mamba backbone.
 >
 > **Why `madmom` comes from Git:** the PyPI release is not compatible with Python 3.10. CODA installs the current development version from the official repository.
 >
