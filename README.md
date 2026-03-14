@@ -33,7 +33,7 @@ bash install.sh
 >
 > **Why `numpy==1.26.4` is pinned:** `madmom` currently fails with NumPy 2.x because its compiled extensions target the NumPy 1.x ABI.
 >
-> **System prerequisites:** a working C/C++ toolchain is required to build `mamba-ssm`, and `ffmpeg` is required only for video export.
+> **System prerequisites:** a working C/C++ toolchain is required to build `mamba-ssm`. `ffmpeg` is included in `environment.yml` because CODA uses it for video export.
 
 If you need Weights & Biases logging, install it separately:
 
