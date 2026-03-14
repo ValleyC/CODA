@@ -19,13 +19,12 @@ Beam search with learned temporal priors decodes the cascade over time. A silenc
 ### Environment Setup
 
 ```bash
-conda create -n coda python=3.10
+conda env create -f environment.yml
 conda activate coda
-pip install -r requirements.txt
 pip install -e .
 ```
 
-> **Note:** `requirements.txt` defaults to CUDA 12.1. For a different CUDA version, edit the `--extra-index-url` line (e.g., replace `cu121` with `cu118`).
+> **Note:** The environment is configured for CUDA 12.1. For a different CUDA version, you may need to adjust the PyTorch and mamba-ssm installations.
 
 ## Data Preparation
 
