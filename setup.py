@@ -4,7 +4,7 @@ from setuptools import setup
 setup(
     name='coda',
     version='1.0',
-    description='CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following',
+    description='CODA: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following',
     packages=setuptools.find_packages(),
     python_requires='>=3.10',
     classifiers=[

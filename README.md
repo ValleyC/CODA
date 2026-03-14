@@ -1,6 +1,6 @@
-# CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following
+# CODA: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following
 
-Official implementation of "CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following" (ISMIR 2026).
+Official implementation of "CODA: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following" (ISMIR 2026).
 
 CODA is a real-time score following system that tracks a live audio performance on sheet music images. It formulates score tracking as a cascaded selection task over known system and bar candidates, combined with a silence-driven jump recovery mechanism for handling score discontinuities.
 
@@ -159,7 +159,7 @@ Pre-trained checkpoints will be released upon paper acceptance.
 
 ```bibtex
 @inproceedings{coda2026,
-  title={CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following},
+  title={CODA: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following},
   author={Anonymous},
   booktitle={Proceedings of the International Society for Music Information Retrieval Conference (ISMIR)},
   year={2026}
