@@ -11,11 +11,11 @@ fi
 echo "[CODA] Upgrading build tools..."
 python -m pip install --upgrade pip setuptools wheel packaging ninja
 
-echo "[CODA] Installing causal-conv1d..."
-python -m pip install causal-conv1d==1.2.2.post1
+echo "[CODA] Building causal-conv1d from source..."
+python -m pip install --no-cache-dir --no-build-isolation causal-conv1d==1.2.2.post1
 
 echo "[CODA] Building mamba-ssm from source against the active PyTorch..."
-python -m pip install --no-build-isolation --no-binary mamba-ssm mamba-ssm==2.2.2
+python -m pip install --no-cache-dir --no-build-isolation mamba-ssm==2.2.2
 
 echo "[CODA] Installing CODA in editable mode..."
 python -m pip install -e .
