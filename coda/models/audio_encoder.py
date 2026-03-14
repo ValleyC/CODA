@@ -13,7 +13,7 @@ from coda.models.modules import Flatten, TemporalBatchNorm
 
 # Try to import Mamba
 try:
-    from mamba_ssm import Mamba
+    from mamba_ssm.modules.mamba_simple import Mamba
     HAS_MAMBA = True
 except ImportError:
     HAS_MAMBA = False
