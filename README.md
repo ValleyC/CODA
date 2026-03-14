@@ -21,14 +21,11 @@ Beam search with learned temporal priors decodes the cascade over time. A silenc
 ```bash
 conda create -n coda python=3.10
 conda activate coda
-
-# Step 1: Install PyTorch with CUDA (adjust cu121 to match your CUDA version)
-pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu121
-
-# Step 2: Install remaining dependencies (requires torch already installed)
 pip install -r requirements.txt
 pip install -e .
 ```
+
+> **Note:** `requirements.txt` defaults to CUDA 12.1. For a different CUDA version, edit the `--extra-index-url` line (e.g., replace `cu121` with `cu118`).
 
 ## Data Preparation
 
