@@ -39,6 +39,7 @@ from tqdm import tqdm
 from coda.models.coda_model import load_model
 from coda.utils.data_utils import load_piece_for_testing, SAMPLE_RATE, FPS, FRAME_SIZE, HOP_SIZE
 from coda.utils.video_utils import create_video
+import json
 
 
 # ── Color palette (BGR uint8) -- muted tones, readable on white score ──────────
@@ -221,6 +222,10 @@ if __name__ == '__main__':
                         help='Break mode: system beam width (-1 = all systems)')
     parser.add_argument('--break_beam_m', type=int, default=3,
                         help='Break mode: bar beam width during break')
+    parser.add_argument('--no_video', action='store_true',
+                        help='Skip video generation (faster batch evaluation)')
+    parser.add_argument('--save_metrics', type=str, default=None,
+                        help='Save jump recovery metrics to JSON file')
 
     args = parser.parse_args()
 
@@ -238,6 +243,14 @@ if __name__ == '__main__':
         sequences = list(npzfile['sequences'])
         jump_metadata = list(npzfile['jump_metadata']) if 'jump_metadata' in npzfile else []
         jump_output_indices = {int(j['output_idx']) for j in jump_metadata}
+        # Pre-compute first non-silence frame after each jump (recovery window start)
+        jump_dest_starts = []
+        for jm in jump_metadata:
+            oi = int(jm['output_idx'])
+            dest = oi
+            while dest < len(sequences) and sequences[dest].get('is_silence', False):
+                dest += 1
+            jump_dest_starts.append(dest)
         print(f"Jump-augmented mode: {len(sequences)} sequence entries, {len(jump_metadata)} jumps")
     npzfile.close()
 
@@ -280,6 +293,27 @@ if __name__ == '__main__':
     # Build page metadata
     page_meta = build_page_metadata(systems, bars)
 
+    # ── Index mappings for jump recovery metrics ──────────────────────
+    # Global system idx -> page-local system idx
+    global_to_page_sys = {}
+    # (page_nr, page-local bar idx) -> global bar idx
+    page_to_global_bar = {}
+    for page_nr in page_meta:
+        sys_on_page = [i for i, s in enumerate(systems) if s['page_nr'] == page_nr]
+        for local_idx, global_idx in enumerate(sys_on_page):
+            global_to_page_sys[global_idx] = local_idx
+        bar_on_page = [i for i, b in enumerate(bars) if b['page_nr'] == page_nr]
+        for local_idx, global_idx in enumerate(bar_on_page):
+            page_to_global_bar[(page_nr, local_idx)] = global_idx
+
+    # Bar onset time mapping: global bar_idx -> first onset time (seconds)
+    bar_onset_time = {}
+    for onset_frame in onsets:
+        pos = interpol_fnc(onset_frame)
+        bar_idx = int(pos[3])
+        if bar_idx not in bar_onset_time:
+            bar_onset_time[bar_idx] = onset_frame / FPS
+
     cond_net = network.conditioning_network
     signal = torch.from_numpy(signal_np).to(device)
     score_tensor = torch.from_numpy(score).unsqueeze(1).to(device)
@@ -301,6 +335,8 @@ if __name__ == '__main__':
     total_frames = 0
     # For video audio track: collect signal chunks in playback order
     audio_chunks = []
+    # Per-frame predictions for jump recovery metrics
+    frame_records = {}
 
     network.reset_tracking_state()
 
@@ -381,8 +417,6 @@ if __name__ == '__main__':
             raw_audio = signal_np[from_:from_ + HOP_SIZE]
             break_diag = network.update_break_mode(signal_np[from_:to_])
 
-        audio_chunks.append(raw_audio)
-
         with torch.no_grad():
             spec_frame = network.compute_spec([sig_excerpt], tempo_aug=False)[0]
             z, hidden = cond_net.get_conditioning(spec_frame, hidden=hidden)
@@ -420,120 +454,141 @@ if __name__ == '__main__':
             else:
                 result = None
 
-        # ── Visualization ────────────────────────────────────────────
+        # ── Computation: extract predictions and record metrics ─────
         center_y, center_x = true_position_xy
         gt_x = center_x - pad
         gt_y = center_y
 
-        # Start from clean score image (uint8 BGR)
-        img = (cv2.cvtColor(org_scores[actual_page], cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
-
-        # System extent for cursor lines
-        s = system
-        sys_y1 = s['y'] - s['h'] / 2
-        sys_y2 = s['y'] + s['h'] / 2
-
-        # -- GT system box (semi-transparent) --
-        sx1 = s['x'] - s['w'] / 2 - pad
-        sx2 = s['x'] + s['w'] / 2 - pad
-        overlay_box(img, sx1, sys_y1, sx2, sys_y2, C_GT_SYS, alpha=0.06,
-                    border_thickness=1, label="GT System")
-
-        # -- GT bar box (semi-transparent) --
-        b = bar
-        bx1, by1 = b['x'] - b['w'] / 2 - pad, b['y'] - b['h'] / 2
-        bx2, by2 = b['x'] + b['w'] / 2 - pad, b['y'] + b['h'] / 2
-        overlay_box(img, bx1, by1, bx2, by2, C_GT_BAR, alpha=0.10,
-                    border_thickness=1, label="GT Bar")
-
-        # -- GT cursor: vertical line + glowing dot --
-        draw_cursor(img, gt_x, sys_y1, sys_y2, C_GT, dot_cy=gt_y,
-                    radius=5, label="GT")
-
-        # -- Jump/silence indicator --
-        if has_sequences and is_silence:
-            cv2.putText(img, "SILENCE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8, C_JUMP, 2, cv2.LINE_AA)
-        if has_sequences and is_at_jump:
-            cv2.putText(img, "JUMP", (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8, C_JUMP, 2, cv2.LINE_AA)
-
+        frame_diff = None
         if result is not None:
             pred_x = result['note_page_x'] * scale_factor - pad
             pred_y = result['note_page_y'] * scale_factor
             best = result['best_path']
-
-            # -- Predicted system box --
             sys_idx = best['system_idx']
-            pred_sys_y1, pred_sys_y2 = sys_y1, sys_y2  # fallback
-            if sys_idx < pm['system_boxes'].shape[0]:
-                sb = pm['system_boxes'][sys_idx]
-                psx1 = sb[0] - sb[2] / 2 - pad
-                psy1 = sb[1] - sb[3] / 2
-                psx2 = sb[0] + sb[2] / 2 - pad
-                psy2 = sb[1] + sb[3] / 2
-                pred_sys_y1, pred_sys_y2 = psy1, psy2
-                overlay_box(img, psx1, psy1, psx2, psy2, C_PRED_SYS, alpha=0.08,
-                            border_thickness=2,
-                            label=f"Pred Sys {sys_idx} ({best['sys_lp']:.1f})")
-
-            # -- Predicted bar box --
             bar_page_idx = best['bar_page_idx']
-            if bar_page_idx < pm['bar_boxes'].shape[0]:
-                bb = pm['bar_boxes'][bar_page_idx]
-                pbx1 = bb[0] - bb[2] / 2 - pad
-                pby1 = bb[1] - bb[3] / 2
-                pbx2 = bb[0] + bb[2] / 2 - pad
-                pby2 = bb[1] + bb[3] / 2
-                overlay_box(img, pbx1, pby1, pbx2, pby2, C_PRED_BAR, alpha=0.10,
-                            border_thickness=2,
-                            label=f"Pred Bar {bar_page_idx} ({best['bar_lp']:.1f})")
 
-            # -- Predicted cursor: vertical line + glowing dot --
-            draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
-                        dot_cy=pred_y, radius=7, label="Pred")
+            # Record for jump recovery metrics
+            if has_sequences:
+                gt_sys_local = global_to_page_sys.get(actual_system, -1)
+                pred_bar_global = page_to_global_bar.get(
+                    (actual_page, bar_page_idx), -1)
+                frame_records[step_idx] = {
+                    'pred_sys': sys_idx,
+                    'gt_sys': gt_sys_local,
+                    'pred_bar_global': pred_bar_global,
+                    'gt_bar_global': actual_bar,
+                    'is_silence': is_silence,
+                }
 
-            # -- Compute error (skip silence frames) --
+            # Compute error (skip silence frames)
             if not is_silence:
                 frame_diff = np.sqrt((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2)
                 frame_diffs.append(frame_diff)
                 total_frames += 1
 
-            # -- Info panel --
-            info = {
-                'System': f"{sys_idx} (lp={best['sys_lp']:.2f})",
-                'Bar': f"{bar_page_idx} (lp={best['bar_lp']:.2f})",
-                'Error': f"{frame_diff:.1f} px" if not is_silence else "—",
-                'Mean Err': f"{np.mean(frame_diffs):.1f} px" if frame_diffs else "—",
-                'Frame': f"{total_frames}",
-            }
-            # Break mode diagnostics
-            if network.break_mode_enabled:
-                ne = break_diag['norm_energy']
-                ne_str = 'warmup' if ne < 0 else f"{ne:.2f}"
-                brk_status = 'SILENCE' if break_diag['in_silence'] else (
-                    f"GRACE({break_diag['grace_frames_remaining']})"
-                    if break_diag['is_break_mode'] else 'off')
-                info['Break'] = brk_status
-                info['Energy'] = ne_str
-            draw_info_panel(img, info)
+        # ── Visualization (skip if --no_video) ────────────────────────
+        do_video = not args.no_video
+        if do_video:
+            audio_chunks.append(raw_audio)
 
-        # -- Rolling spectrogram side panel --
-        if vis_spec is not None:
-            vis_spec = np.roll(vis_spec, -1, axis=1)
-        else:
-            vis_spec = np.zeros((spec_frame.shape[-1], 60))
-        vis_spec[:, -1] = spec_frame[0].cpu().numpy()
+            # Start from clean score image (uint8 BGR)
+            img = (cv2.cvtColor(org_scores[actual_page], cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
 
-        spec_panel = prepare_spec_panel(vis_spec, img.shape[0], width=220)
-        spec_panel = (spec_panel * 255).astype(np.uint8)
-        img = np.concatenate((img, spec_panel), axis=1)
+            # System extent for cursor lines
+            s = system
+            sys_y1 = s['y'] - s['h'] / 2
+            sys_y2 = s['y'] + s['h'] / 2
 
-        if args.plot:
-            cv2.imshow('Selection Prediction', img)
-            cv2.waitKey(20)
+            # -- GT system box (semi-transparent) --
+            sx1 = s['x'] - s['w'] / 2 - pad
+            sx2 = s['x'] + s['w'] / 2 - pad
+            overlay_box(img, sx1, sys_y1, sx2, sys_y2, C_GT_SYS, alpha=0.06,
+                        border_thickness=1, label="GT System")
 
-        observation_images.append(img)
+            # -- GT bar box (semi-transparent) --
+            b = bar
+            bx1, by1 = b['x'] - b['w'] / 2 - pad, b['y'] - b['h'] / 2
+            bx2, by2 = b['x'] + b['w'] / 2 - pad, b['y'] + b['h'] / 2
+            overlay_box(img, bx1, by1, bx2, by2, C_GT_BAR, alpha=0.10,
+                        border_thickness=1, label="GT Bar")
+
+            # -- GT cursor: vertical line + glowing dot --
+            draw_cursor(img, gt_x, sys_y1, sys_y2, C_GT, dot_cy=gt_y,
+                        radius=5, label="GT")
+
+            # -- Jump/silence indicator --
+            if has_sequences and is_silence:
+                cv2.putText(img, "SILENCE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, C_JUMP, 2, cv2.LINE_AA)
+            if has_sequences and is_at_jump:
+                cv2.putText(img, "JUMP", (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, C_JUMP, 2, cv2.LINE_AA)
+
+            if result is not None:
+                # -- Predicted system box --
+                pred_sys_y1, pred_sys_y2 = sys_y1, sys_y2  # fallback
+                if sys_idx < pm['system_boxes'].shape[0]:
+                    sb = pm['system_boxes'][sys_idx]
+                    psx1 = sb[0] - sb[2] / 2 - pad
+                    psy1 = sb[1] - sb[3] / 2
+                    psx2 = sb[0] + sb[2] / 2 - pad
+                    psy2 = sb[1] + sb[3] / 2
+                    pred_sys_y1, pred_sys_y2 = psy1, psy2
+                    overlay_box(img, psx1, psy1, psx2, psy2, C_PRED_SYS, alpha=0.08,
+                                border_thickness=2,
+                                label=f"Pred Sys {sys_idx} ({best['sys_lp']:.1f})")
+
+                # -- Predicted bar box --
+                if bar_page_idx < pm['bar_boxes'].shape[0]:
+                    bb = pm['bar_boxes'][bar_page_idx]
+                    pbx1 = bb[0] - bb[2] / 2 - pad
+                    pby1 = bb[1] - bb[3] / 2
+                    pbx2 = bb[0] + bb[2] / 2 - pad
+                    pby2 = bb[1] + bb[3] / 2
+                    overlay_box(img, pbx1, pby1, pbx2, pby2, C_PRED_BAR, alpha=0.10,
+                                border_thickness=2,
+                                label=f"Pred Bar {bar_page_idx} ({best['bar_lp']:.1f})")
+
+                # -- Predicted cursor: vertical line + glowing dot --
+                draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
+                            dot_cy=pred_y, radius=7, label="Pred")
+
+                # -- Info panel --
+                info = {
+                    'System': f"{sys_idx} (lp={best['sys_lp']:.2f})",
+                    'Bar': f"{bar_page_idx} (lp={best['bar_lp']:.2f})",
+                    'Error': f"{frame_diff:.1f} px" if frame_diff is not None else "—",
+                    'Mean Err': f"{np.mean(frame_diffs):.1f} px" if frame_diffs else "—",
+                    'Frame': f"{total_frames}",
+                }
+                # Break mode diagnostics
+                if network.break_mode_enabled:
+                    ne = break_diag['norm_energy']
+                    ne_str = 'warmup' if ne < 0 else f"{ne:.2f}"
+                    brk_status = 'SILENCE' if break_diag['in_silence'] else (
+                        f"GRACE({break_diag['grace_frames_remaining']})"
+                        if break_diag['is_break_mode'] else 'off')
+                    info['Break'] = brk_status
+                    info['Energy'] = ne_str
+                draw_info_panel(img, info)
+
+            # -- Rolling spectrogram side panel --
+            if vis_spec is not None:
+                vis_spec = np.roll(vis_spec, -1, axis=1)
+            else:
+                vis_spec = np.zeros((spec_frame.shape[-1], 60))
+            vis_spec[:, -1] = spec_frame[0].cpu().numpy()
+
+            spec_panel = prepare_spec_panel(vis_spec, img.shape[0], width=220)
+            spec_panel = (spec_panel * 255).astype(np.uint8)
+            img = np.concatenate((img, spec_panel), axis=1)
+
+            if args.plot:
+                cv2.imshow('Selection Prediction', img)
+                cv2.waitKey(20)
+
+            observation_images.append(img)
+
         prev_audio_frame = audio_frame
         pbar.update(1)
 
@@ -542,6 +597,7 @@ if __name__ == '__main__':
     if args.plot:
         cv2.destroyAllWindows()
 
+    # ── Basic tracking results ────────────────────────────────────────
     if frame_diffs:
         print(f"\n{'='*50}")
         print(f"[Results] {piece_name}")
@@ -552,15 +608,109 @@ if __name__ == '__main__':
             print(f"  Jumps: {len(jump_metadata)}")
         print(f"{'='*50}")
 
-    # Build audio track from collected chunks
-    if audio_chunks:
-        video_signal = np.concatenate(audio_chunks)
-    else:
-        video_signal = signal_np
+    # ── Jump Recovery Metrics (ISMIR Table 2) ─────────────────────────
+    metrics = None
+    if has_sequences and frame_records and jump_metadata:
+        window_1s = int(round(1.0 * FPS))
+        window_2s = int(round(2.0 * FPS))
+        window_5s = int(round(5.0 * FPS))
 
-    tag = "_selection" if args.page is None else f"_{args.page}_selection"
-    if has_sequences:
-        tag = "_jump" + tag
-    create_video(observation_images, video_signal, piece_name, FPS, SAMPLE_RATE,
-                 tag=tag, path=args.output_dir)
-    print(f"Video saved to {args.output_dir}/{piece_name}{tag}.mp4")
+        recovery_1s_list = []
+        recovery_2s_list = []
+        latency_list = []
+        post_jump_within_1s = []
+
+        for ji, dest_start in enumerate(jump_dest_starts):
+            recovered_1s = False
+            recovered_2s = False
+            first_correct_offset = None
+
+            max_window = max(window_2s, window_5s)
+            for offset in range(max_window):
+                idx = dest_start + offset
+                rec = frame_records.get(idx)
+                if rec is None or rec['is_silence']:
+                    continue
+
+                sys_correct = (rec['pred_sys'] == rec['gt_sys'])
+
+                if sys_correct and first_correct_offset is None:
+                    first_correct_offset = offset
+
+                if offset < window_1s and sys_correct:
+                    recovered_1s = True
+                if offset < window_2s and sys_correct:
+                    recovered_2s = True
+
+                # Post-jump tracking error: bar onset time difference
+                if offset < window_5s:
+                    gt_time = bar_onset_time.get(rec['gt_bar_global'], 0)
+                    pred_time = bar_onset_time.get(rec['pred_bar_global'], 0)
+                    time_err = abs(pred_time - gt_time)
+                    post_jump_within_1s.append(time_err <= 1.0)
+
+            recovery_1s_list.append(recovered_1s)
+            recovery_2s_list.append(recovered_2s)
+            if first_correct_offset is not None:
+                latency_list.append(first_correct_offset / FPS)
+            else:
+                latency_list.append(None)
+
+        n_jumps = len(jump_dest_starts)
+        rec_1s = sum(recovery_1s_list) / n_jumps if n_jumps else 0
+        rec_2s = sum(recovery_2s_list) / n_jumps if n_jumps else 0
+        valid_latencies = [l for l in latency_list if l is not None]
+        mean_lat = np.mean(valid_latencies) if valid_latencies else float('inf')
+        post_acc = (sum(post_jump_within_1s) / len(post_jump_within_1s)
+                    if post_jump_within_1s else 0)
+
+        print(f"\n{'='*60}")
+        print(f"[Jump Recovery Metrics] {piece_name}")
+        print(f"{'='*60}")
+        print(f"  Jumps evaluated:        {n_jumps}")
+        print(f"  Sys Recovery Rate @1s:  {rec_1s:.3f}  "
+              f"({sum(recovery_1s_list)}/{n_jumps})")
+        print(f"  Sys Recovery Rate @2s:  {rec_2s:.3f}  "
+              f"({sum(recovery_2s_list)}/{n_jumps})")
+        lat_str = f"{mean_lat:.3f}" if mean_lat < float('inf') else "N/A"
+        print(f"  Mean Recovery Latency:  {lat_str} s  "
+              f"(recovered: {len(valid_latencies)}/{n_jumps})")
+        print(f"  Post-Jump Err<=1.0s:    {post_acc:.3f}  "
+              f"({sum(post_jump_within_1s)}/{len(post_jump_within_1s)} frames)")
+        print(f"{'='*60}")
+
+        metrics = {
+            'piece': piece_name,
+            'n_jumps': n_jumps,
+            'sys_recovery_1s': rec_1s,
+            'sys_recovery_2s': rec_2s,
+            'mean_latency_s': mean_lat if mean_lat < float('inf') else None,
+            'post_jump_err_1s': post_acc,
+            'n_recovered_1s': sum(recovery_1s_list),
+            'n_recovered_2s': sum(recovery_2s_list),
+            'n_recovered': len(valid_latencies),
+            'latency_per_jump': latency_list,
+            'post_jump_acc_frames': sum(post_jump_within_1s),
+            'post_jump_total_frames': len(post_jump_within_1s),
+            'mean_frame_diff_px': float(np.mean(frame_diffs)) if frame_diffs else None,
+        }
+
+        if args.save_metrics:
+            os.makedirs(os.path.dirname(args.save_metrics) or '.', exist_ok=True)
+            with open(args.save_metrics, 'w') as f:
+                json.dump(metrics, f, indent=2)
+            print(f"Metrics saved to {args.save_metrics}")
+
+    # ── Video generation ──────────────────────────────────────────────
+    if not args.no_video:
+        if audio_chunks:
+            video_signal = np.concatenate(audio_chunks)
+        else:
+            video_signal = signal_np
+
+        tag = "_selection" if args.page is None else f"_{args.page}_selection"
+        if has_sequences:
+            tag = "_jump" + tag
+        create_video(observation_images, video_signal, piece_name, FPS, SAMPLE_RATE,
+                     tag=tag, path=args.output_dir)
+        print(f"Video saved to {args.output_dir}/{piece_name}{tag}.mp4")

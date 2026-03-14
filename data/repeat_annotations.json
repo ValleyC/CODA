@@ -490,23 +490,21 @@
     "performance_order": [
       [
         0,
-        8
+        7
       ],
       [
         0,
-        8
+        7
       ],
       [
-        9,
+        8,
         17
       ],
       [
-        9,
+        8,
         17
       ]
-    ],
-    "needs_review": true,
-    "_note": "Confirm bar split at 9"
+    ]
   },
   "MozartWA__KV331__KV331_1_5_var4_synth": {
     "bars": 18,
