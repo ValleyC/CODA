@@ -21,10 +21,24 @@ Beam search with learned temporal priors decodes the cascade over time. A silenc
 ```bash
 conda env create -f environment.yml
 conda activate coda
-pip install -e .
+bash install.sh
 ```
 
-> **Note:** The environment is configured for CUDA 12.1. For a different CUDA version, you may need to adjust the PyTorch and mamba-ssm installations.
+> **Tested setup:** Linux, Python 3.10, CUDA 12.1, PyTorch 2.2.0, `mamba-ssm` 2.2.2, `madmom` 0.17.dev0.
+>
+> **Why `install.sh` is required:** `mamba-ssm` prebuilt wheels often mismatch the local PyTorch ABI. The script builds `mamba-ssm` from source against the active PyTorch installation.
+>
+> **Why `madmom` comes from Git:** the PyPI release is not compatible with Python 3.10. CODA installs the current development version from the official repository.
+>
+> **Why `numpy==1.26.4` is pinned:** `madmom` currently fails with NumPy 2.x because its compiled extensions target the NumPy 1.x ABI.
+>
+> **System prerequisites:** a working C/C++ toolchain is required to build `mamba-ssm`, and `ffmpeg` is required only for video export.
+
+If you need Weights & Biases logging, install it separately:
+
+```bash
+pip install wandb
+```
 
 ## Data Preparation
 

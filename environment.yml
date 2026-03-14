@@ -4,13 +4,12 @@ channels:
 dependencies:
   - python=3.10
   - pip
+  - git
   - pip:
     - --extra-index-url https://download.pytorch.org/whl/cu121
-    - torch==2.2.0
-    - torchvision==0.17.0
-    - torchaudio==2.2.0
-    - causal-conv1d==1.2.2.post1
-    - mamba-ssm==2.2.2
+    - torch==2.2.0+cu121
+    - torchvision==0.17.0+cu121
+    - torchaudio==2.2.0+cu121
     - cython==3.2.4
     - numpy==1.26.4
     - scipy==1.15.3
@@ -22,3 +21,7 @@ dependencies:
     - soundfile==0.13.1
     - tensorboard==2.20.0
     - matplotlib==3.10.8
+    # mamba-ssm is intentionally omitted here.
+    # Its prebuilt wheels often mismatch the local PyTorch ABI.
+    # Install it from source after activating the environment:
+    #   bash install.sh
