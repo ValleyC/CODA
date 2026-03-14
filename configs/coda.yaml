@@ -1,0 +1,114 @@
+# Selection-Based Hierarchical Score Following
+# System -> Bar -> Note cascade via classification over known MSMD annotations
+#
+# Architecture:
+#   Shared backbone + FPN -> P3 (stride 8)
+#   SelectionHead on ROI-aligned P3 at ALL systems -> log p(system_i)
+#   SelectionHead on ROI-aligned P3 at bars in system -> log p(bar_j | system_i)
+#   NoteHead on ROI-aligned P3 at selected bar -> sigmoid (cx,cy) within bar
+
+nc: 3
+cascade: true
+selection: true
+groupnorm: true
+activation: nn.ELU
+
+# Per-frame Mamba conditioning (shared across all stages)
+encoder: {'type': MambaConditioning, 'params': {
+    'n_mamba_layers': 2,
+    'zdim': 128,
+    'hidden_size': 64,
+    'freq_dim': 78,
+    'd_state': 16,
+    'd_conv': 4,
+    'expand': 2,
+    'dropout': 0.1,
+    'encoder_type': 'linear',
+    'normalize_input': true
+}}
+
+# Shared visual backbone
+backbone:
+  [[-1, Focus, [16, 3]],
+   [-1, Conv, [32, 3, 2]],
+   [-1, Bottleneck, [32, 1, 32]],
+   [-1, Conv, [64, 3, 2]],
+   [-1, Bottleneck, [64, 1, 32]],
+   [-1, FiLMConv, [128, 3, 2]],
+   [-1, Bottleneck, [128, 1, 32]],
+   [-1, FiLMConv, [128, 3, 2]],
+   [-1, Bottleneck, [128, 1, 32]]]
+
+# FPN head (produces P3 feature map)
+head:
+  [[-1, FiLMConv, [128, 3, 1]],
+   [-1, nn.Upsample, [None, 2, 'nearest']],
+   [[-1, 6], Concat, [1]],
+   [-1, Bottleneck, [128, 1, 32]],
+   [-1, FiLMConv, [128, 3, 1]],
+   [-1, nn.Upsample, [None, 2, 'nearest']],
+   [[-1, 4], Concat, [1]],
+   [-1, Bottleneck, [128, 1, 32]]]
+
+# Selection-specific configuration
+cascade_config:
+  # ROI sizes for each cascade stage
+  system_roi_size: [4, 24]
+  bar_roi_size: [4, 8]
+  note_roi_size: [6, 12]
+
+  # SelectionHead dropout
+  selection_dropout: 0.1
+
+  # Beam search parameters
+  top_k_systems: 3
+  top_m_bars: 3
+
+  # Temporal prior weights (log-space)
+  system_transition:
+    same: 0.0
+    adjacent: -1.0
+    far: -5.0
+  bar_transition:
+    stay: 0.0
+    forward_1: -0.3
+    forward_2: -1.5
+    backward_1: -2.0
+    far: -5.0
+
+  # System head: SelectionHeadV2 with cross-attention over Mamba audio buffer
+  head_v2:
+    use_cross_attn: true
+    num_heads: 4
+    layer_scale_init: 0.1
+    audio_window: 64
+    attn_dropout: 0.1
+    use_candidate_context: false    # enable in ablation step 3
+
+  # Bar head: SelectionHeadV2 with cross-attention over audio history
+  bar_head_v2:
+    use_cross_attn: true
+    num_heads: 4
+    layer_scale_init: 0.1
+    audio_window: 64
+    attn_dropout: 0.1
+    use_candidate_context: false
+
+  # Break mode: silence-triggered prior suppression + beam widening for jump recovery
+  # Inference only -- no retraining needed
+  break_mode:
+    enabled: false
+    onset_threshold: 0.1           # enter silence when normalized energy drops below this
+    release_threshold: 0.25        # exit silence when normalized energy rises above this
+    energy_window: 100             # frames for running mean/std normalization
+    min_history: 10                # frames before detection activates
+    silence_onset_frames: 3        # ~150ms at 20fps before entering break mode
+    grace_frames: 8                # ~400ms after audio resumes for relocalization
+    prior_scale: 0.0               # 0 = full suppression during break
+    beam_k_systems: -1             # -1 = all systems during break
+    beam_m_bars: 3                 # keep modest (note head evaluated per path)
+
+  # Scheduled sampling: use --scheduled_sampling flag in scripts/train.py.
+  # When enabled, system routing is gradually replaced with predicted routing.
+  # Bar targets are remapped to the predicted system's candidate set;
+  # bar/note loss is masked when the GT bar is not in the predicted system.

@@ -1,0 +1,24 @@
+name: coda
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch>=2.0
+  - torchvision>=0.15
+  - torchaudio>=2.0
+  - pytorch-cuda=11.8
+  - numpy>=1.24
+  - scipy>=1.10
+  - pip
+  - pip:
+    - mamba-ssm>=1.0
+    - librosa>=0.10
+    - madmom>=0.16
+    - opencv-python>=4.5
+    - PyYAML>=6.0
+    - tqdm>=4.65
+    - soundfile>=0.12
+    - tensorboard>=2.12

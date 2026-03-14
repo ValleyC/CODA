@@ -1,0 +1,180 @@
+# CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following
+
+Official implementation of "CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following" (ISMIR 2026).
+
+CODA is a real-time score following system that tracks a live audio performance on sheet music images. It formulates score tracking as a cascaded selection task over known system and bar candidates, combined with a silence-driven jump recovery mechanism for handling score discontinuities.
+
+## Architecture
+
+CODA processes audio through a causal Mamba state-space encoder and the score page through a convolutional backbone with FPN. Three cascaded stages progressively narrow the prediction:
+
+1. **System Selection**: Classifies the active system among all systems on the page using ROI-aligned features with FiLM conditioning and cross-attention over the audio history.
+2. **Bar Selection**: Classifies the active bar within the selected system, using the same FiLM + cross-attention pipeline with independent parameters.
+3. **Note Localization**: Regresses continuous bar-local coordinates within the selected bar via FiLM-conditioned features and sigmoid output.
+
+Beam search with learned temporal priors decodes the cascade over time. A silence-driven break mode enables recovery from arbitrary score discontinuities (repeats, D.C., coda jumps).
+
+## Requirements
+
+### Environment Setup
+
+```bash
+conda create -n coda python=3.10
+conda activate coda
+pip install -r requirements.txt
+```
+
+For Mamba SSM support (recommended):
+```bash
+pip install mamba-ssm
+```
+
+### Dependencies
+
+- PyTorch >= 2.0
+- torchvision
+- torchaudio
+- mamba-ssm
+- librosa
+- madmom
+- opencv-python
+- scipy
+- numpy
+- pyyaml
+- tqdm
+- soundfile
+- tensorboard
+
+## Data Preparation
+
+### MSMD Dataset
+
+Download the [Multimodal Sheet Music Dataset (MSMD)](https://zenodo.org/record/4745838):
+
+```bash
+mkdir -p data
+cd data
+wget https://zenodo.org/record/4745838/files/msmd.zip
+unzip msmd.zip
+```
+
+Expected directory structure:
+```
+data/
+  msmd/
+    msmd_train/
+      PieceName.npz
+      PieceName.wav
+      ...
+    msmd_valid/
+      ...
+    msmd_test/
+      ...
+```
+
+### Speed Augmentation (Optional)
+
+Generate tempo-augmented training variants:
+```bash
+# See data/README.md for details
+```
+
+### Jump Augmentation (Optional)
+
+Generate jump-augmented variants for jump recovery training and evaluation:
+```bash
+python scripts/generate_jump_data.py \
+    --input_dir data/msmd/msmd_train \
+    --output_dir data/msmd/msmd_train_jump \
+    --num_variants 3
+```
+
+## Training
+
+### Phase 1: Ground-Truth Routing
+
+```bash
+python scripts/train.py \
+    --config configs/coda.yaml \
+    --train_sets data/msmd/msmd_train \
+    --val_sets data/msmd/msmd_valid \
+    --tag coda_phase1 \
+    --temporal_priors \
+    --augment \
+    --batch_size 16 \
+    --num_epochs 30 \
+    --lr 5e-4
+```
+
+### Phase 2: Scheduled Sampling
+
+Fine-tune from Phase 1 checkpoint:
+```bash
+python scripts/train.py \
+    --config configs/coda.yaml \
+    --train_sets data/msmd/msmd_train \
+    --val_sets data/msmd/msmd_valid \
+    --param_path params/<phase1_dir>/best_model.pt \
+    --tag coda_phase2 \
+    --temporal_priors \
+    --augment \
+    --scheduled_sampling \
+    --ss_max_p 0.7 \
+    --ss_ramp_epochs 5 \
+    --batch_size 16 \
+    --num_epochs 20 \
+    --lr 1e-4
+```
+
+## Evaluation
+
+### Standard Tracking
+
+```bash
+python scripts/evaluate.py \
+    --param_path params/<phase2_dir>/best_model.pt \
+    --test_dir data/msmd/msmd_test \
+    --test_piece PieceName
+```
+
+### With Break Mode (Jump Recovery)
+
+```bash
+python scripts/evaluate.py \
+    --param_path params/<phase2_dir>/best_model.pt \
+    --test_dir data/msmd/msmd_test \
+    --test_piece PieceName \
+    --break_mode
+```
+
+### Generate Video Output
+
+```bash
+python scripts/evaluate.py \
+    --param_path params/<phase2_dir>/best_model.pt \
+    --test_dir data/msmd/msmd_test \
+    --test_piece PieceName \
+    --plot \
+    --output_dir videos/
+```
+
+## Pre-trained Models
+
+Pre-trained checkpoints will be released upon paper acceptance.
+
+## Citation
+
+```bibtex
+@inproceedings{coda2026,
+  title={CODA: Cascaded Online Detection-Free Alignment with Jump Recovery for Real-Time Score Following},
+  author={Anonymous},
+  booktitle={Proceedings of the International Society for Music Information Retrieval Conference (ISMIR)},
+  year={2026}
+}
+```
+
+## Acknowledgments
+
+- [MSMD Dataset](https://zenodo.org/record/4745838) for training and evaluation data
+- Visual backbone architecture adapted from [YOLOv5](https://github.com/ultralytics/yolov5)
+- Audio encoder based on [Mamba](https://github.com/state-spaces/mamba)
