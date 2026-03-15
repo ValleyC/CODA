@@ -68,10 +68,10 @@ def run_evaluate(piece_name, args, metrics_path):
         if args.break_beam_m is not None:
             cmd.extend(['--break_beam_m', str(args.break_beam_m)])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Let stderr (tqdm progress bar) pass through to terminal
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=None, text=True)
     if result.returncode != 0:
         print(f"  FAILED: {piece_name}")
-        print(f"  stderr: {result.stderr[-500:]}")
         return None
 
     if os.path.exists(metrics_path):
