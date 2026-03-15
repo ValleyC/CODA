@@ -11,18 +11,13 @@ Usage:
         --test_dir data/msmd/msmd_test_jump/repeat \
         --break_mode --label "CODA (full)"
 
-    # Evaluate both subsets
+    # With videos (inline, one piece at a time)
     python scripts/evaluate_batch.py \
         --param_path pretrained/best_model.pt \
         --test_dir data/msmd/msmd_test_jump/repeat \
         --break_mode --label "CODA (full) repeat" \
-        --save_summary results/repeat_summary.json
-
-    # Generate videos in parallel after metrics are done
-    python scripts/evaluate_batch.py \
-        --param_path pretrained/best_model.pt \
-        --test_dir data/msmd/msmd_test_jump/repeat \
-        --break_mode --with_video --video_workers 4
+        --save_summary results/repeat_summary.json \
+        --with_video --video_dir results/videos/repeat
 """
 
 import os
@@ -48,9 +43,12 @@ def run_evaluate(piece_name, args, metrics_path):
         '--param_path', args.param_path,
         '--test_dir', args.test_dir,
         '--test_piece', piece_name,
-        '--no_video',
         '--save_metrics', metrics_path,
     ]
+    if args.with_video:
+        cmd.extend(['--output_dir', args.video_dir])
+    else:
+        cmd.append('--no_video')
     if args.break_mode:
         cmd.append('--break_mode')
         if args.break_onset_threshold is not None:
@@ -79,19 +77,6 @@ def run_evaluate(piece_name, args, metrics_path):
             return json.load(f)
     return None
 
-
-def run_video(piece_name, args, output_dir):
-    """Run evaluate.py with video generation for a single piece."""
-    cmd = [
-        sys.executable, 'scripts/evaluate.py',
-        '--param_path', args.param_path,
-        '--test_dir', args.test_dir,
-        '--test_piece', piece_name,
-        '--output_dir', output_dir,
-    ]
-    if args.break_mode:
-        cmd.append('--break_mode')
-    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
 def aggregate_metrics(all_metrics):
@@ -229,9 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--break_beam_m', type=int, default=None)
     # Video
     parser.add_argument('--with_video', action='store_true',
-                        help='Also generate videos (in parallel after metrics)')
-    parser.add_argument('--video_workers', type=int, default=4,
-                        help='Max parallel video generation processes')
+                        help='Also generate videos inline (one piece at a time)')
     parser.add_argument('--video_dir', type=str, default='results/videos',
                         help='Output directory for videos')
 
@@ -281,39 +264,3 @@ if __name__ == '__main__':
         with open(args.save_summary, 'w') as f:
             json.dump(clean, f, indent=2)
         print(f"\n  Summary saved to {args.save_summary}")
-
-    # ── Phase 3: Parallel video generation (CPU-bound) ────────────────
-    if args.with_video:
-        os.makedirs(args.video_dir, exist_ok=True)
-        print(f"\n  Generating videos ({args.video_workers} workers)...")
-        active = []
-        video_pieces = list(pieces)  # all pieces
-
-        while video_pieces or active:
-            # Launch up to video_workers
-            while video_pieces and len(active) < args.video_workers:
-                p = video_pieces.pop(0)
-                proc = run_video(p, args, args.video_dir)
-                active.append((p, proc))
-                print(f"    Started video: {p}")
-
-            # Wait for any to finish
-            still_active = []
-            for p, proc in active:
-                ret = proc.poll()
-                if ret is not None:
-                    if ret != 0:
-                        stderr = proc.stderr.read().decode() if proc.stderr else ''
-                        print(f"    Video FAILED: {p} (rc={ret})")
-                    else:
-                        print(f"    Video done: {p}")
-                else:
-                    still_active.append((p, proc))
-            active = still_active
-
-            if active and not video_pieces:
-                # Wait a bit for remaining
-                import time
-                time.sleep(1)
-
-        print("  All videos done.")
