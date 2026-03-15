@@ -29,9 +29,9 @@ Regenerate these pieces and re-check to verify the fixes.
 
 ## BWVAnh113 — `BachJS__BWVAnh113__anna-magdalena-03_synth`
 
-**Issue**: First repeat boundary was at bar 15 instead of bar 12. Missed the repeat sign at bar 12.
+**Issue**: First repeat boundary was at bar 15 instead of bar 12, then corrected to bar 12 but should be bar 11.
 
-**Fix**: Changed `performance_order` from `[[0,15],[0,15],[16,31],[16,31]]` to `[[0,12],[0,12],[13,31],[13,31]]`.
+**Fix**: Changed `performance_order` from `[[0,15],[0,15],[16,31],[16,31]]` to `[[0,11],[0,11],[12,31],[12,31]]`.
 
 ---
 
