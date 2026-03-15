@@ -168,3 +168,11 @@ Regenerate these pieces and re-check to verify the fixes.
 **Issue**: First repeat boundary too early (`[0,6]` instead of `[0,9]`).
 
 **Fix**: Changed `performance_order` from `[[0,6],[0,6],[7,13],[7,13]]` to `[[0,9],[0,9],[10,13],[10,13]]`. Removed `needs_review`.
+
+---
+
+## Andre Sonatine Op.34 — `AndreJ__O34__andre-sonatine_synth`
+
+**Issue**: Was incorrectly marked as `has_repeats: false`. Score has 4 repeated sections with repeat barlines at bars 7, 23, 32, and 56, followed by a coda (bars 57-61).
+
+**Fix**: Changed `has_repeats` to `true`. Set `repeat_type` to `multi_section`. Set `performance_order` to `[[0,7],[0,7],[8,23],[8,23],[24,32],[24,32],[33,56],[33,56],[57,61]]`. Removed `needs_review`.

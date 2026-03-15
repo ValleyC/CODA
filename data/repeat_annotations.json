@@ -2,9 +2,19 @@
   "_description": "Repeat structure annotations for MSMD test pieces. performance_order lists bar index ranges [start, end] (inclusive, 0-indexed) in the order a performer would play them. Where consecutive segments go backward, a jump (with silence) is inserted.",
   "AndreJ__O34__andre-sonatine_synth": {
     "bars": 62,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "multi_section",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 23],
+      [8, 23],
+      [24, 32],
+      [24, 32],
+      [33, 56],
+      [33, 56],
+      [57, 61]
+    ]
   },
   "Anonymous__lanative__lanative_synth": {
     "bars": 17,
