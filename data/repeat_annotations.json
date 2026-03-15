@@ -729,52 +729,21 @@
   "Traditional__traditioner_af_swenska_folk_dansar.1.26__traditioner_af_swenska_folk_dansar.1.26_synth": {
     "bars": 9,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "full_repeat",
     "performance_order": [
       [
         0,
-        3
-      ],
-      [
-        0,
-        3
-      ],
-      [
-        4,
         8
       ],
       [
-        4,
+        1,
         8
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.1.29__traditioner_af_swenska_folk_dansar.1.29_synth": {
     "bars": 14,
-    "has_repeats": true,
-    "repeat_type": "binary",
-    "performance_order": [
-      [
-        0,
-        6
-      ],
-      [
-        0,
-        6
-      ],
-      [
-        7,
-        13
-      ],
-      [
-        7,
-        13
-      ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    "has_repeats": false
   },
   "Traditional__traditioner_af_swenska_folk_dansar.1.2__traditioner_af_swenska_folk_dansar.1.2_synth": {
     "bars": 16,
@@ -919,23 +888,21 @@
     "performance_order": [
       [
         0,
-        5
+        3
       ],
       [
         0,
-        5
+        3
       ],
       [
-        6,
+        4,
         11
       ],
       [
-        6,
+        4,
         11
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.2.36__traditioner_af_swenska_folk_dansar.2.36_synth": {
     "bars": 16,
@@ -965,27 +932,33 @@
   "Traditional__traditioner_af_swenska_folk_dansar.3.12__traditioner_af_swenska_folk_dansar.3.12_synth": {
     "bars": 18,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "ternary",
     "performance_order": [
       [
         0,
-        8
+        5
       ],
       [
         0,
-        8
+        5
       ],
       [
-        9,
+        6,
+        11
+      ],
+      [
+        6,
+        11
+      ],
+      [
+        12,
         17
       ],
       [
-        9,
+        12,
         17
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.13__traditioner_af_swenska_folk_dansar.3.13_synth": {
     "bars": 8,
@@ -1119,23 +1092,21 @@
     "performance_order": [
       [
         0,
-        9
+        7
       ],
       [
         0,
-        9
+        7
       ],
       [
-        10,
+        8,
         19
       ],
       [
-        10,
+        8,
         19
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.24__traditioner_af_swenska_folk_dansar.3.24_synth": {
     "bars": 20,
@@ -1144,23 +1115,21 @@
     "performance_order": [
       [
         0,
-        9
+        7
       ],
       [
         0,
-        9
+        7
       ],
       [
-        10,
+        8,
         19
       ],
       [
-        10,
+        8,
         19
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.34__traditioner_af_swenska_folk_dansar.3.34_synth": {
     "bars": 14,
@@ -1169,48 +1138,36 @@
     "performance_order": [
       [
         0,
-        6
+        9
       ],
       [
         0,
-        6
+        9
       ],
       [
-        7,
+        10,
         13
       ],
       [
-        7,
+        10,
         13
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.6__traditioner_af_swenska_folk_dansar.3.6_synth": {
     "bars": 13,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "full_repeat",
     "performance_order": [
       [
         0,
-        5
+        12
       ],
       [
         0,
-        5
-      ],
-      [
-        6,
-        12
-      ],
-      [
-        6,
         12
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.7__traditioner_af_swenska_folk_dansar.3.7_synth": {
     "bars": 8,
@@ -1240,27 +1197,29 @@
   "Traditional__traditioner_af_swenska_folk_dansar.3.8__traditioner_af_swenska_folk_dansar.3.8_synth": {
     "bars": 19,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "volta",
     "performance_order": [
       [
         0,
         8
       ],
       [
-        0,
-        8
+        1,
+        7
       ],
       [
         9,
-        18
+        17
       ],
       [
-        9,
+        10,
+        16
+      ],
+      [
+        18,
         18
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.3.9__traditioner_af_swenska_folk_dansar.3.9_synth": {
     "bars": 7,
@@ -1269,23 +1228,21 @@
     "performance_order": [
       [
         0,
-        2
+        3
       ],
       [
         0,
-        2
+        3
       ],
       [
-        3,
+        4,
         6
       ],
       [
-        3,
+        4,
         6
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Yaniewicz__leslanciers__leslanciers_synth": {
     "bars": 18,
