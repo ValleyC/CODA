@@ -39,8 +39,7 @@ def mux_video_audio(path_video, path_audio, path_output='output_audio.mp4'):
 
 def create_video(observation_images, signal, piece_name, fps, sample_rate, path="../videos", tag=""):
 
-    if not os.path.exists(path):
-        os.mkdir(path)
+    os.makedirs(path, exist_ok=True)
 
     # create temp wavfile
     wav_path = os.path.join(tempfile.gettempdir(), str(time.time()) + '.wav')
