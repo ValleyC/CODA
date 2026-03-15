@@ -18,19 +18,34 @@
   },
   "Anonymous__lanative__lanative_synth": {
     "bars": 17,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "da_capo",
+    "performance_order": [
+      [0, 16],
+      [0, 8]
+    ]
   },
   "BachJS__BWV1006a__bwv-1006a_5_synth": {
     "bars": 32,
-    "has_repeats": false
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 15],
+      [0, 15],
+      [16, 31],
+      [16, 31]
+    ]
   },
   "BachJS__BWV117a__BWV-117a_synth": {
     "bars": 16,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 15],
+      [8, 15]
+    ]
   },
   "BachJS__BWV511__BWV-511_synth": {
     "bars": 12,
@@ -136,27 +151,51 @@
   },
   "BachJS__BWV825__15title-hub_synth": {
     "bars": 56,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "volta",
+    "performance_order": [
+      [0, 15],
+      [0, 14],
+      [16, 38],
+      [17, 37],
+      [39, 47],
+      [40, 47],
+      [48, 55],
+      [48, 55]
+    ]
   },
   "BachJS__BWV825__16title-hub_synth": {
     "bars": 48,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 15],
+      [0, 15],
+      [16, 47],
+      [16, 47]
+    ]
   },
   "BachJS__BWV829__55title-hub_synth": {
     "bars": 52,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 11],
+      [0, 11],
+      [12, 51],
+      [12, 51]
+    ]
   },
   "BachJS__BWV830__BWV-830-2_synth": {
     "bars": 22,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 8],
+      [0, 8],
+      [9, 21],
+      [9, 21]
+    ]
   },
   "BachJS__BWV856__BWV856_Fugue11_synth": {
     "bars": 73,
@@ -335,15 +374,24 @@
   },
   "BachJS__BWVAnh131__air_synth": {
     "bars": 17,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 16],
+      [8, 16]
+    ]
   },
   "BachJS__BWVAnh691__BWV-691_synth": {
     "bars": 10,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "first_half",
+    "performance_order": [
+      [0, 4],
+      [0, 4],
+      [5, 9]
+    ]
   },
   "BartokB__rom_folk_dance_1_bartok__rom_folk_dance_1_bartok_synth": {
     "bars": 16,
@@ -351,27 +399,53 @@
   },
   "BeethovenLv__O79__LVB_Sonate_79_1_synth": {
     "bars": 206,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "volta",
+    "performance_order": [
+      [0, 49],
+      [1, 48],
+      [50, 173],
+      [52, 169],
+      [174, 205]
+    ]
   },
   "BurgmullerJFF__O100__25EF-02_synth": {
     "bars": 33,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "volta",
+    "performance_order": [
+      [0, 9],
+      [2, 8],
+      [10, 26],
+      [11, 25],
+      [27, 32]
+    ]
   },
   "BurgmullerJFF__O100__25EF-08_synth": {
     "bars": 16,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "da_capo",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 15],
+      [0, 7]
+    ]
   },
   "BurgmullerJFF__O100__25EF-14_synth": {
     "bars": 40,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "da_capo",
+    "performance_order": [
+      [0, 12],
+      [4, 12],
+      [13, 29],
+      [13, 29],
+      [30, 38],
+      [30, 37],
+      [39, 39],
+      [0, 29]
+    ]
   },
   "ChopinFF__O28__Chop-28-11_synth": {
     "bars": 27,
@@ -413,15 +487,33 @@
   },
   "HandelGF__Aylesford__10-menuetii_synth": {
     "bars": 26,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 25],
+      [8, 25]
+    ]
   },
   "HandelGF__Aylesford__16-airmitvar_synth": {
     "bars": 43,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "multi_section",
+    "performance_order": [
+      [0, 4],
+      [0, 4],
+      [5, 13],
+      [5, 13],
+      [14, 18],
+      [14, 18],
+      [19, 27],
+      [19, 27],
+      [28, 32],
+      [28, 32],
+      [33, 42],
+      [33, 42]
+    ]
   },
   "HandelGF__Aylesford__19-menuet_synth": {
     "bars": 24,
@@ -450,9 +542,9 @@
   },
   "Kruetzer__lodiska__lodiska_synth": {
     "bars": 27,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "da_capo",
+    "performance_order": [[0, 17], [0, 17], [18, 26], [18, 26], [0, 8]]
   },
   "MozartWA__KV331__KV331_1_2_var1_synth": {
     "bars": 18,
@@ -502,9 +594,13 @@
   },
   "MuellerAE__muller-siciliano__muller-siciliano_synth": {
     "bars": 22,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "first_half",
+    "performance_order": [
+      [0, 7],
+      [0, 7],
+      [8, 21]
+    ]
   },
   "MussorgskyM__pictures-at-an-exhibition__catacombae_synth": {
     "bars": 30,
@@ -520,7 +616,13 @@
   },
   "SatieE__gymnopedie_1__gymnopedie_1_synth": {
     "bars": 47,
-    "has_repeats": false
+    "has_repeats": true,
+    "repeat_type": "volta",
+    "performance_order": [
+      [0, 38],
+      [0, 30],
+      [39, 46]
+    ]
   },
   "SatieE__gymnopedie_3__gymnopedie_3_synth": {
     "bars": 60,
@@ -555,15 +657,15 @@
   },
   "SchumannR__O68__schumann-op68-06-pauvre-orpheline_synth": {
     "bars": 22,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Schumann Album - check for repeats"
+    "has_repeats": true,
+    "repeat_type": "second_half",
+    "performance_order": [[0, 21], [9, 21]]
   },
   "SchumannR__O68__schumann-op68-08-cavalier-sauvage_synth": {
     "bars": 27,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Schumann Album - check for repeats"
+    "has_repeats": true,
+    "repeat_type": "first_half",
+    "performance_order": [[0, 8], [0, 8], [9, 26]]
   },
   "SchumannR__O68__schumann-op68-09-chanson-populaire_synth": {
     "bars": 24,
@@ -573,15 +675,15 @@
   },
   "SchumannR__O68__schumann-op68-16-premier-chagrin_synth": {
     "bars": 34,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Schumann Album - check for repeats"
+    "has_repeats": true,
+    "repeat_type": "second_half",
+    "performance_order": [[0, 33], [17, 33]]
   },
   "SchumannR__O68__schumann-op68-26-sans-titre_synth": {
     "bars": 24,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Schumann Album - check for repeats"
+    "has_repeats": true,
+    "repeat_type": "binary",
+    "performance_order": [[0, 8], [0, 8], [9, 23], [9, 23]]
   },
   "ScriabinA__O16__scriabine-op16-no5_synth": {
     "bars": 24,
@@ -1254,8 +1356,8 @@
   },
   "Yaniewicz__leslanciers__leslanciers_synth": {
     "bars": 18,
-    "has_repeats": false,
-    "needs_review": true,
-    "_note": "Check score image for repeat signs"
+    "has_repeats": true,
+    "repeat_type": "volta",
+    "performance_order": [[0, 7], [0, 6], [8, 17], [9, 17]]
   }
 }
