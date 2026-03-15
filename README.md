@@ -124,36 +124,79 @@ python scripts/train.py \
 
 ## Evaluation
 
-### Standard Tracking
+### Standard Tracking (Single Piece)
 
 ```bash
 python scripts/evaluate.py \
-    --param_path params/<phase2_dir>/best_model.pt \
+    --param_path pretrained/best_model.pt \
     --test_dir data/msmd/msmd_test \
     --test_piece PieceName
 ```
 
-### With Break Mode (Jump Recovery)
+### Jump Recovery (Single Piece)
 
-Evaluate on the repeat-aware jump-augmented test set:
+Evaluate on the repeat-aware jump-augmented test set with break mode enabled:
 ```bash
 python scripts/evaluate.py \
-    --param_path params/<phase2_dir>/best_model.pt \
+    --param_path pretrained/best_model.pt \
     --test_dir data/msmd/msmd_test_jump/repeat \
     --test_piece PieceName \
     --break_mode
 ```
 
-### Generate Video Output
+This prints per-piece jump recovery metrics (system recovery rate, latency, post-jump tracking accuracy) at multiple thresholds.
 
+### Batch Evaluation (All Pieces)
+
+Evaluate all pieces in a directory and aggregate metrics:
+```bash
+# Repeat subset
+python scripts/evaluate_batch.py \
+    --param_path pretrained/best_model.pt \
+    --test_dir data/msmd/msmd_test_jump/repeat \
+    --break_mode \
+    --label "CODA (full) - repeat" \
+    --metrics_dir results/metrics/repeat \
+    --save_summary results/repeat_summary.json
+
+# Random subset
+python scripts/evaluate_batch.py \
+    --param_path pretrained/best_model.pt \
+    --test_dir data/msmd/msmd_test_jump/random \
+    --break_mode \
+    --label "CODA (full) - random" \
+    --metrics_dir results/metrics/random \
+    --save_summary results/random_summary.json
+```
+
+This runs inference sequentially (GPU-bound), then prints an aggregated summary table with macro/micro averages and a LaTeX row for the manuscript.
+
+### Video Generation
+
+Generate a tracking visualization video for a single piece:
 ```bash
 python scripts/evaluate.py \
-    --param_path params/<phase2_dir>/best_model.pt \
+    --param_path pretrained/best_model.pt \
     --test_dir data/msmd/msmd_test \
     --test_piece PieceName \
-    --plot \
     --output_dir videos/
 ```
+
+Use `--plot` to also display the visualization in a live window. Use `--no_video` to skip video generation (metrics only).
+
+To batch-evaluate with parallel video generation:
+```bash
+python scripts/evaluate_batch.py \
+    --param_path pretrained/best_model.pt \
+    --test_dir data/msmd/msmd_test_jump/repeat \
+    --break_mode \
+    --label "CODA (full) - repeat" \
+    --metrics_dir results/metrics/repeat \
+    --save_summary results/repeat_summary.json \
+    --with_video --video_dir results/videos/repeat --video_workers 4
+```
+
+Videos are generated in parallel (CPU-bound) after all metrics are computed. Adjust `--video_workers` based on available CPU cores.
 
 ## Pre-trained Models
 
