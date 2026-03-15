@@ -94,27 +94,23 @@ python scripts/generate_repeat_test.py \
     --seed 42
 
 echo "=== Evaluating jump recovery (repeat subset) ==="
-for piece in data/msmd/msmd_test_jump/repeat/*.npz; do
-    piece_name=$(basename "$piece" .npz)
-    echo "Evaluating (repeat): ${piece_name}"
-    python scripts/evaluate.py \
-        --param_path ${PHASE2_DIR}/best_model.pt \
-        --test_dir data/msmd/msmd_test_jump/repeat \
-        --test_piece ${piece_name} \
-        --break_mode \
-        --output_dir results/jump_repeat/
-done
+python scripts/evaluate_batch.py \
+    --param_path ${PHASE2_DIR}/best_model.pt \
+    --test_dir data/msmd/msmd_test_jump/repeat \
+    --break_mode \
+    --label "CODA (full) - repeat subset" \
+    --metrics_dir results/metrics/repeat \
+    --save_summary results/repeat_summary.json \
+    --with_video --video_dir results/jump_repeat/ --video_workers 4
 
 echo "=== Evaluating jump recovery (random subset) ==="
-for piece in data/msmd/msmd_test_jump/random/*.npz; do
-    piece_name=$(basename "$piece" .npz)
-    echo "Evaluating (random): ${piece_name}"
-    python scripts/evaluate.py \
-        --param_path ${PHASE2_DIR}/best_model.pt \
-        --test_dir data/msmd/msmd_test_jump/random \
-        --test_piece ${piece_name} \
-        --break_mode \
-        --output_dir results/jump_random/
-done
+python scripts/evaluate_batch.py \
+    --param_path ${PHASE2_DIR}/best_model.pt \
+    --test_dir data/msmd/msmd_test_jump/random \
+    --break_mode \
+    --label "CODA (full) - random subset" \
+    --metrics_dir results/metrics/random \
+    --save_summary results/random_summary.json \
+    --with_video --video_dir results/jump_random/ --video_workers 4
 
 echo "=== Done! Results saved to results/ ==="

@@ -608,24 +608,29 @@ if __name__ == '__main__':
             print(f"  Jumps: {len(jump_metadata)}")
         print(f"{'='*50}")
 
-    # ── Jump Recovery Metrics (ISMIR Table 2) ─────────────────────────
+    # ── Jump Recovery Metrics (comprehensive) ───────────────────────────
+    # System recovery rate at multiple thresholds, tracking error at
+    # multiple tolerances, evaluated in a post-jump window.
+    RECOVERY_THRESHOLDS = [0.5, 1.0, 2.0, 3.0, 5.0]   # seconds
+    ERROR_THRESHOLDS    = [0.5, 1.0, 2.0, 3.0]          # seconds
+    POST_JUMP_WINDOW    = 5.0                            # seconds
+
     metrics = None
     if has_sequences and frame_records and jump_metadata:
-        window_1s = int(round(1.0 * FPS))
-        window_2s = int(round(2.0 * FPS))
-        window_5s = int(round(5.0 * FPS))
+        window_frames = {t: int(round(t * FPS)) for t in RECOVERY_THRESHOLDS}
+        post_window = int(round(POST_JUMP_WINDOW * FPS))
 
-        recovery_1s_list = []
-        recovery_2s_list = []
+        # Per-jump accumulators
+        recovery_lists = {t: [] for t in RECOVERY_THRESHOLDS}
         latency_list = []
-        post_jump_within_1s = []
+        # Post-jump tracking: collect raw time errors for all frames
+        post_jump_time_errors = []
 
         for ji, dest_start in enumerate(jump_dest_starts):
-            recovered_1s = False
-            recovered_2s = False
+            recovered = {t: False for t in RECOVERY_THRESHOLDS}
             first_correct_offset = None
 
-            max_window = max(window_2s, window_5s)
+            max_window = max(max(window_frames.values()), post_window)
             for offset in range(max_window):
                 idx = dest_start + offset
                 rec = frame_records.get(idx)
@@ -637,63 +642,84 @@ if __name__ == '__main__':
                 if sys_correct and first_correct_offset is None:
                     first_correct_offset = offset
 
-                if offset < window_1s and sys_correct:
-                    recovered_1s = True
-                if offset < window_2s and sys_correct:
-                    recovered_2s = True
+                for t in RECOVERY_THRESHOLDS:
+                    if offset < window_frames[t] and sys_correct:
+                        recovered[t] = True
 
                 # Post-jump tracking error: bar onset time difference
-                if offset < window_5s:
+                if offset < post_window:
                     gt_time = bar_onset_time.get(rec['gt_bar_global'], 0)
                     pred_time = bar_onset_time.get(rec['pred_bar_global'], 0)
                     time_err = abs(pred_time - gt_time)
-                    post_jump_within_1s.append(time_err <= 1.0)
+                    post_jump_time_errors.append(time_err)
 
-            recovery_1s_list.append(recovered_1s)
-            recovery_2s_list.append(recovered_2s)
+            for t in RECOVERY_THRESHOLDS:
+                recovery_lists[t].append(recovered[t])
             if first_correct_offset is not None:
                 latency_list.append(first_correct_offset / FPS)
             else:
                 latency_list.append(None)
 
         n_jumps = len(jump_dest_starts)
-        rec_1s = sum(recovery_1s_list) / n_jumps if n_jumps else 0
-        rec_2s = sum(recovery_2s_list) / n_jumps if n_jumps else 0
+        recovery_rates = {}
+        for t in RECOVERY_THRESHOLDS:
+            recovery_rates[t] = sum(recovery_lists[t]) / n_jumps if n_jumps else 0
         valid_latencies = [l for l in latency_list if l is not None]
         mean_lat = np.mean(valid_latencies) if valid_latencies else float('inf')
-        post_acc = (sum(post_jump_within_1s) / len(post_jump_within_1s)
-                    if post_jump_within_1s else 0)
+        median_lat = np.median(valid_latencies) if valid_latencies else float('inf')
 
+        error_accuracies = {}
+        for t in ERROR_THRESHOLDS:
+            error_accuracies[t] = (
+                sum(1 for e in post_jump_time_errors if e <= t)
+                / len(post_jump_time_errors)
+            ) if post_jump_time_errors else 0
+
+        # Print comprehensive results
         print(f"\n{'='*60}")
         print(f"[Jump Recovery Metrics] {piece_name}")
         print(f"{'='*60}")
-        print(f"  Jumps evaluated:        {n_jumps}")
-        print(f"  Sys Recovery Rate @1s:  {rec_1s:.3f}  "
-              f"({sum(recovery_1s_list)}/{n_jumps})")
-        print(f"  Sys Recovery Rate @2s:  {rec_2s:.3f}  "
-              f"({sum(recovery_2s_list)}/{n_jumps})")
+        print(f"  Jumps evaluated: {n_jumps}")
+        print(f"  --- System Recovery Rate ---")
+        for t in RECOVERY_THRESHOLDS:
+            n_rec = sum(recovery_lists[t])
+            print(f"    @{t:.1f}s: {recovery_rates[t]:.3f}  ({n_rec}/{n_jumps})")
         lat_str = f"{mean_lat:.3f}" if mean_lat < float('inf') else "N/A"
-        print(f"  Mean Recovery Latency:  {lat_str} s  "
+        med_str = f"{median_lat:.3f}" if median_lat < float('inf') else "N/A"
+        print(f"  --- Recovery Latency ---")
+        print(f"    Mean:   {lat_str} s  "
               f"(recovered: {len(valid_latencies)}/{n_jumps})")
-        print(f"  Post-Jump Err<=1.0s:    {post_acc:.3f}  "
-              f"({sum(post_jump_within_1s)}/{len(post_jump_within_1s)} frames)")
+        print(f"    Median: {med_str} s")
+        print(f"  --- Post-Jump Tracking Accuracy ({POST_JUMP_WINDOW:.0f}s window) ---")
+        for t in ERROR_THRESHOLDS:
+            n_ok = sum(1 for e in post_jump_time_errors if e <= t)
+            print(f"    Err<={t:.1f}s: {error_accuracies[t]:.3f}  "
+                  f"({n_ok}/{len(post_jump_time_errors)} frames)")
+        if post_jump_time_errors:
+            print(f"    Mean err: {np.mean(post_jump_time_errors):.3f} s  "
+                  f"Median: {np.median(post_jump_time_errors):.3f} s")
         print(f"{'='*60}")
 
         metrics = {
             'piece': piece_name,
             'n_jumps': n_jumps,
-            'sys_recovery_1s': rec_1s,
-            'sys_recovery_2s': rec_2s,
             'mean_latency_s': mean_lat if mean_lat < float('inf') else None,
-            'post_jump_err_1s': post_acc,
-            'n_recovered_1s': sum(recovery_1s_list),
-            'n_recovered_2s': sum(recovery_2s_list),
+            'median_latency_s': median_lat if median_lat < float('inf') else None,
             'n_recovered': len(valid_latencies),
             'latency_per_jump': latency_list,
-            'post_jump_acc_frames': sum(post_jump_within_1s),
-            'post_jump_total_frames': len(post_jump_within_1s),
+            'post_jump_total_frames': len(post_jump_time_errors),
             'mean_frame_diff_px': float(np.mean(frame_diffs)) if frame_diffs else None,
         }
+        for t in RECOVERY_THRESHOLDS:
+            metrics[f'sys_recovery_{t:.1f}s'] = recovery_rates[t]
+            metrics[f'n_recovered_{t:.1f}s'] = sum(recovery_lists[t])
+        for t in ERROR_THRESHOLDS:
+            metrics[f'post_jump_err_{t:.1f}s'] = error_accuracies[t]
+            metrics[f'post_jump_ok_{t:.1f}s'] = sum(
+                1 for e in post_jump_time_errors if e <= t)
+        if post_jump_time_errors:
+            metrics['post_jump_mean_err_s'] = float(np.mean(post_jump_time_errors))
+            metrics['post_jump_median_err_s'] = float(np.median(post_jump_time_errors))
 
         if args.save_metrics:
             os.makedirs(os.path.dirname(args.save_metrics) or '.', exist_ok=True)
