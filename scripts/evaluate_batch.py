@@ -306,10 +306,15 @@ if __name__ == '__main__':
                         help='Also generate videos inline (one piece at a time)')
     parser.add_argument('--video_dir', type=str, default='results/videos',
                         help='Output directory for videos')
+    parser.add_argument('--pieces', type=str, nargs='+', default=None,
+                        help='Only evaluate these specific pieces (by name)')
 
     args = parser.parse_args()
 
     pieces = find_pieces(args.test_dir)
+    if args.pieces:
+        piece_set = set(args.pieces)
+        pieces = [p for p in pieces if p in piece_set]
     if not pieces:
         print(f"No NPZ files found in {args.test_dir}")
         sys.exit(1)
