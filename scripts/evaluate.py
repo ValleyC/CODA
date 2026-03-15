@@ -314,6 +314,41 @@ if __name__ == '__main__':
         if bar_idx not in bar_onset_time:
             bar_onset_time[bar_idx] = onset_frame / FPS
 
+    # ── Onset evaluation data (Table 1: onset error ratios) ───────
+    onset_set = set(int(o) for o in onsets)
+    onset_data = {}
+    sys_onset_points = {}  # global_sys_idx -> {'xs': [], 'times': []}
+    for onset_frame in onsets:
+        pos = interpol_fnc(onset_frame)
+        x_unpadded = pos[1] - pad
+        sys_idx = int(pos[2])
+        onset_data[int(onset_frame)] = {
+            'x': x_unpadded,
+            'time': onset_frame / FPS,
+            'sys': sys_idx,
+        }
+        if sys_idx not in sys_onset_points:
+            sys_onset_points[sys_idx] = {'xs': [], 'times': []}
+        sys_onset_points[sys_idx]['xs'].append(x_unpadded)
+        sys_onset_points[sys_idx]['times'].append(onset_frame / FPS)
+
+    # Per-system inverse mapping: x_position -> time (seconds)
+    system_x_to_time = {}
+    for sys_idx, data in sys_onset_points.items():
+        xs = np.array(data['xs'])
+        ts = np.array(data['times'])
+        _, unique_idx = np.unique(xs, return_index=True)
+        xs, ts = xs[unique_idx], ts[unique_idx]
+        sort_idx = np.argsort(xs)
+        system_x_to_time[sys_idx] = (xs[sort_idx], ts[sort_idx])
+
+    # (page_nr, page-local sys idx) -> global sys idx
+    page_sys_to_global = {}
+    for page_nr in page_meta:
+        sys_on_page = [i for i, s in enumerate(systems) if s['page_nr'] == page_nr]
+        for local_idx, global_idx in enumerate(sys_on_page):
+            page_sys_to_global[(page_nr, local_idx)] = global_idx
+
     cond_net = network.conditioning_network
     signal = torch.from_numpy(signal_np).to(device)
     score_tensor = torch.from_numpy(score).unsqueeze(1).to(device)
@@ -337,6 +372,12 @@ if __name__ == '__main__':
     audio_chunks = []
     # Per-frame predictions for jump recovery metrics
     frame_records = {}
+    # Standard tracking accuracy (all modes)
+    sys_correct_count = 0
+    bar_correct_count = 0
+    total_eval_frames = 0
+    # Onset predictions for Table 1 metrics (non-jump mode)
+    onset_predictions = {}
 
     network.reset_tracking_state()
 
@@ -467,11 +508,12 @@ if __name__ == '__main__':
             sys_idx = best['system_idx']
             bar_page_idx = best['bar_page_idx']
 
+            gt_sys_local = global_to_page_sys.get(actual_system, -1)
+            pred_bar_global = page_to_global_bar.get(
+                (actual_page, bar_page_idx), -1)
+
             # Record for jump recovery metrics
             if has_sequences:
-                gt_sys_local = global_to_page_sys.get(actual_system, -1)
-                pred_bar_global = page_to_global_bar.get(
-                    (actual_page, bar_page_idx), -1)
                 frame_records[step_idx] = {
                     'pred_sys': sys_idx,
                     'gt_sys': gt_sys_local,
@@ -485,6 +527,22 @@ if __name__ == '__main__':
                 frame_diff = np.sqrt((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2)
                 frame_diffs.append(frame_diff)
                 total_frames += 1
+
+                # System & bar accuracy (Table 1)
+                if sys_idx == gt_sys_local:
+                    sys_correct_count += 1
+                if pred_bar_global == actual_bar:
+                    bar_correct_count += 1
+                total_eval_frames += 1
+
+                # Store onset prediction (non-jump mode, for Table 1 error ratios)
+                if not has_sequences and audio_frame in onset_set:
+                    pred_sys_global = page_sys_to_global.get(
+                        (actual_page, sys_idx), -1)
+                    onset_predictions[audio_frame] = {
+                        'pred_x': pred_x,
+                        'pred_sys_global': pred_sys_global,
+                    }
 
         # ── Visualization (skip if --no_video) ────────────────────────
         do_video = not args.no_video
@@ -608,14 +666,72 @@ if __name__ == '__main__':
             print(f"  Jumps: {len(jump_metadata)}")
         print(f"{'='*50}")
 
+    # ── Standard Tracking Metrics (Table 1) ────────────────────────────
+    ONSET_THRESHOLDS = [0.05, 0.10, 0.50, 1.00, 5.00]  # seconds
+    sys_accuracy = sys_correct_count / total_eval_frames if total_eval_frames else 0
+    bar_accuracy = bar_correct_count / total_eval_frames if total_eval_frames else 0
+
+    onset_errors = []
+    if not has_sequences and onset_predictions:
+        for onset_frame in onsets:
+            of = int(onset_frame)
+            pred = onset_predictions.get(of)
+            if pred is None:
+                continue
+            od = onset_data[of]
+            gt_time = od['time']
+            pred_sys_global = pred['pred_sys_global']
+            pred_x_val = pred['pred_x']
+
+            mapping = system_x_to_time.get(pred_sys_global)
+            if mapping is not None and len(mapping[0]) >= 2:
+                xs, ts = mapping
+                pred_time = float(np.interp(pred_x_val, xs, ts))
+                time_err = abs(pred_time - gt_time)
+            else:
+                time_err = 100.0  # wrong system or sparse mapping
+            onset_errors.append(time_err)
+
+    onset_ratios = {}
+    if onset_errors:
+        for t in ONSET_THRESHOLDS:
+            onset_ratios[t] = sum(1 for e in onset_errors if e <= t) / len(onset_errors)
+
+        print(f"\n{'='*60}")
+        print(f"[Standard Tracking Metrics] {piece_name}")
+        print(f"{'='*60}")
+        print(f"  System accuracy: {sys_accuracy:.4f}")
+        print(f"  Bar accuracy:    {bar_accuracy:.4f}")
+        print(f"  Onsets evaluated: {len(onset_errors)}")
+        print(f"  --- Onset Error Ratios ---")
+        for t in ONSET_THRESHOLDS:
+            print(f"    <={t:.2f}s: {onset_ratios[t]:.4f}")
+        print(f"{'='*60}")
+    elif total_eval_frames > 0:
+        print(f"\n  System accuracy: {sys_accuracy:.4f}  "
+              f"Bar accuracy: {bar_accuracy:.4f}")
+
+    # ── Build base metrics dict (always saved) ─────────────────────────
+    metrics = {
+        'piece': piece_name,
+        'sys_accuracy': sys_accuracy,
+        'bar_accuracy': bar_accuracy,
+        'total_eval_frames': total_eval_frames,
+        'mean_frame_diff_px': float(np.mean(frame_diffs)) if frame_diffs else None,
+    }
+    for t in ONSET_THRESHOLDS:
+        metrics[f'onset_ratio_{t:.2f}s'] = onset_ratios.get(t, None)
+    if onset_errors:
+        metrics['n_onsets_evaluated'] = len(onset_errors)
+        metrics['mean_onset_err_s'] = float(np.mean(onset_errors))
+        metrics['median_onset_err_s'] = float(np.median(onset_errors))
+
     # ── Jump Recovery Metrics (comprehensive) ───────────────────────────
     # System recovery rate at multiple thresholds, tracking error at
     # multiple tolerances, evaluated in a post-jump window.
     RECOVERY_THRESHOLDS = [0.5, 1.0, 2.0, 3.0, 5.0]   # seconds
     ERROR_THRESHOLDS    = [0.5, 1.0, 2.0, 3.0]          # seconds
     POST_JUMP_WINDOW    = 5.0                            # seconds
-
-    metrics = None
     if has_sequences and frame_records and jump_metadata:
         window_frames = {t: int(round(t * FPS)) for t in RECOVERY_THRESHOLDS}
         post_window = int(round(POST_JUMP_WINDOW * FPS))
@@ -700,16 +816,12 @@ if __name__ == '__main__':
                   f"Median: {np.median(post_jump_time_errors):.3f} s")
         print(f"{'='*60}")
 
-        metrics = {
-            'piece': piece_name,
-            'n_jumps': n_jumps,
-            'mean_latency_s': mean_lat if mean_lat < float('inf') else None,
-            'median_latency_s': median_lat if median_lat < float('inf') else None,
-            'n_recovered': len(valid_latencies),
-            'latency_per_jump': latency_list,
-            'post_jump_total_frames': len(post_jump_time_errors),
-            'mean_frame_diff_px': float(np.mean(frame_diffs)) if frame_diffs else None,
-        }
+        metrics['n_jumps'] = n_jumps
+        metrics['mean_latency_s'] = mean_lat if mean_lat < float('inf') else None
+        metrics['median_latency_s'] = median_lat if median_lat < float('inf') else None
+        metrics['n_recovered'] = len(valid_latencies)
+        metrics['latency_per_jump'] = latency_list
+        metrics['post_jump_total_frames'] = len(post_jump_time_errors)
         for t in RECOVERY_THRESHOLDS:
             metrics[f'sys_recovery_{t:.1f}s'] = recovery_rates[t]
             metrics[f'n_recovered_{t:.1f}s'] = sum(recovery_lists[t])
@@ -721,11 +833,12 @@ if __name__ == '__main__':
             metrics['post_jump_mean_err_s'] = float(np.mean(post_jump_time_errors))
             metrics['post_jump_median_err_s'] = float(np.median(post_jump_time_errors))
 
-        if args.save_metrics:
-            os.makedirs(os.path.dirname(args.save_metrics) or '.', exist_ok=True)
-            with open(args.save_metrics, 'w') as f:
-                json.dump(metrics, f, indent=2)
-            print(f"Metrics saved to {args.save_metrics}")
+    # ── Save metrics (always) ──────────────────────────────────────────
+    if args.save_metrics:
+        os.makedirs(os.path.dirname(args.save_metrics) or '.', exist_ok=True)
+        with open(args.save_metrics, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        print(f"Metrics saved to {args.save_metrics}")
 
     # ── Video generation ──────────────────────────────────────────────
     if not args.no_video:

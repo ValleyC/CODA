@@ -29,28 +29,26 @@
     "performance_order": [
       [
         0,
-        5
+        4
       ],
       [
         0,
-        5
+        4
       ],
       [
-        6,
+        5,
         11
       ],
       [
-        6,
+        5,
         11
       ]
-    ],
-    "needs_review": true,
-    "_note": "Notebook piece - verify"
+    ]
   },
   "BachJS__BWV512__BWV-512_synth": {
     "bars": 12,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "first_half",
     "performance_order": [
       [
         0,
@@ -59,10 +57,6 @@
       [
         0,
         5
-      ],
-      [
-        6,
-        11
       ],
       [
         6,
@@ -75,7 +69,7 @@
   "BachJS__BWV516__BWV-516_synth": {
     "bars": 18,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "first_half",
     "performance_order": [
       [
         0,
@@ -88,14 +82,8 @@
       [
         9,
         17
-      ],
-      [
-        9,
-        17
       ]
-    ],
-    "needs_review": true,
-    "_note": "Notebook piece - verify"
+    ]
   },
   "BachJS__BWV775__bach-invention-04_synth": {
     "bars": 52,
@@ -273,23 +261,21 @@
     "performance_order": [
       [
         0,
-        15
+        12
       ],
       [
         0,
-        15
+        12
       ],
       [
-        16,
+        13,
         31
       ],
       [
-        16,
+        13,
         31
       ]
-    ],
-    "needs_review": true,
-    "_note": "Notebook piece - verify"
+    ]
   },
   "BachJS__BWVAnh116__anna-magdalena-07_synth": {
     "bars": 40,
@@ -323,23 +309,21 @@
     "performance_order": [
       [
         0,
-        14
+        12
       ],
       [
         0,
-        14
+        12
       ],
       [
-        15,
+        13,
         29
       ],
       [
-        15,
+        13,
         29
       ]
-    ],
-    "needs_review": true,
-    "_note": "Notebook piece - verify"
+    ]
   },
   "BachJS__BWVAnh131__air_synth": {
     "bars": 17,
@@ -355,28 +339,7 @@
   },
   "BartokB__rom_folk_dance_1_bartok__rom_folk_dance_1_bartok_synth": {
     "bars": 16,
-    "has_repeats": true,
-    "repeat_type": "binary",
-    "performance_order": [
-      [
-        0,
-        7
-      ],
-      [
-        0,
-        7
-      ],
-      [
-        8,
-        15
-      ],
-      [
-        8,
-        15
-      ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance"
+    "has_repeats": false
   },
   "BeethovenLv__O79__LVB_Sonate_79_1_synth": {
     "bars": 206,
@@ -513,23 +476,21 @@
     "performance_order": [
       [
         0,
-        8
+        7
       ],
       [
         0,
-        8
+        7
       ],
       [
-        9,
+        8,
         17
       ],
       [
-        9,
+        8,
         17
       ]
-    ],
-    "needs_review": true,
-    "_note": "Same form as Var 1"
+    ]
   },
   "MuellerAE__muller-siciliano__muller-siciliano_synth": {
     "bars": 22,
@@ -674,23 +635,21 @@
     "performance_order": [
       [
         0,
-        3
+        2
       ],
       [
         0,
-        3
+        2
       ],
       [
-        4,
+        3,
         7
       ],
       [
-        4,
+        3,
         7
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.1.19__traditioner_af_swenska_folk_dansar.1.19_synth": {
     "bars": 16,
@@ -874,23 +833,21 @@
     "performance_order": [
       [
         0,
-        6
+        7
       ],
       [
         0,
-        6
+        7
       ],
       [
-        7,
+        8,
         13
       ],
       [
-        7,
+        8,
         13
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.1.4__traditioner_af_swenska_folk_dansar.1.4_synth": {
     "bars": 16,
@@ -924,48 +881,36 @@
     "performance_order": [
       [
         0,
-        4
+        3
       ],
       [
         0,
-        4
+        3
       ],
       [
-        5,
+        4,
         9
       ],
       [
-        5,
+        4,
         9
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.1.6__traditioner_af_swenska_folk_dansar.1.6_synth": {
     "bars": 8,
     "has_repeats": true,
-    "repeat_type": "binary",
+    "repeat_type": "full_repeat",
     "performance_order": [
       [
         0,
-        3
+        7
       ],
       [
         0,
-        3
-      ],
-      [
-        4,
-        7
-      ],
-      [
-        4,
         7
       ]
-    ],
-    "needs_review": true,
-    "_note": "Folk dance - verify bar split"
+    ]
   },
   "Traditional__traditioner_af_swenska_folk_dansar.2.27__traditioner_af_swenska_folk_dansar.2.27_synth": {
     "bars": 12,

@@ -133,6 +133,8 @@ python scripts/evaluate.py \
     --test_piece PieceName
 ```
 
+This prints onset error ratios at multiple thresholds, system/bar accuracy, and frame-level pixel error.
+
 ### Jump Recovery (Single Piece)
 
 Evaluate on the repeat-aware jump-augmented test set with break mode enabled:
@@ -150,7 +152,15 @@ This prints per-piece jump recovery metrics (system recovery rate, latency, post
 
 Evaluate all pieces in a directory and aggregate metrics:
 ```bash
-# Repeat subset
+# Standard tracking — Table 1 (MSMD test set, 94 pieces)
+python scripts/evaluate_batch.py \
+    --param_path pretrained/best_model.pt \
+    --test_dir data/msmd/msmd_test \
+    --label "CODA (ours)" \
+    --metrics_dir results/metrics/standard \
+    --save_summary results/standard_summary.json
+
+# Jump recovery — Table 2, repeat subset
 python scripts/evaluate_batch.py \
     --param_path pretrained/best_model.pt \
     --test_dir data/msmd/msmd_test_jump/repeat \
@@ -159,7 +169,7 @@ python scripts/evaluate_batch.py \
     --metrics_dir results/metrics/repeat \
     --save_summary results/repeat_summary.json
 
-# Random subset
+# Jump recovery — Table 2, random subset
 python scripts/evaluate_batch.py \
     --param_path pretrained/best_model.pt \
     --test_dir data/msmd/msmd_test_jump/random \
@@ -169,7 +179,7 @@ python scripts/evaluate_batch.py \
     --save_summary results/random_summary.json
 ```
 
-This runs inference sequentially (GPU-bound), then prints an aggregated summary table with macro/micro averages and a LaTeX row for the manuscript.
+For standard tracking, the script prints onset error ratios (<=0.05s through <=5.00s), system accuracy, bar accuracy, and a Table 1 LaTeX row. For jump recovery, it additionally prints recovery rates, latency, post-jump tracking accuracy, and a Table 2 LaTeX row.
 
 ### Video Generation
 
@@ -184,7 +194,7 @@ python scripts/evaluate.py \
 
 Use `--plot` to also display the visualization in a live window. Use `--no_video` to skip video generation (metrics only).
 
-To batch-evaluate with parallel video generation:
+To batch-evaluate with inline video generation:
 ```bash
 python scripts/evaluate_batch.py \
     --param_path pretrained/best_model.pt \
@@ -193,10 +203,10 @@ python scripts/evaluate_batch.py \
     --label "CODA (full) - repeat" \
     --metrics_dir results/metrics/repeat \
     --save_summary results/repeat_summary.json \
-    --with_video --video_dir results/videos/repeat --video_workers 4
+    --with_video --video_dir results/videos/repeat
 ```
 
-Videos are generated in parallel (CPU-bound) after all metrics are computed. Adjust `--video_workers` based on available CPU cores.
+Videos are generated inline (one piece at a time) during the metrics pass.
 
 ## Pre-trained Models
 
