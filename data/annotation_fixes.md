@@ -13,9 +13,9 @@ Regenerate these pieces and re-check to verify the fixes.
 
 ## BWV 512 — `BachJS__BWV512__BWV-512_synth`
 
-**Issue**: Unnecessary second-half repeat. Only the first half has a repeat sign.
+**Issue**: Unnecessary second-half repeat. Only the first half has a repeat sign. First repeat boundary also one bar too late.
 
-**Fix**: Changed `repeat_type` from `binary` to `first_half`. Changed `performance_order` from `[[0,5],[0,5],[6,11],[6,11]]` to `[[0,5],[0,5],[6,11]]`.
+**Fix**: Changed `repeat_type` from `binary` to `first_half`. Changed `performance_order` from `[[0,5],[0,5],[6,11],[6,11]]` to `[[0,4],[0,4],[5,11]]`.
 
 ---
 

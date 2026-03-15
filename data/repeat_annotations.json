@@ -52,19 +52,17 @@
     "performance_order": [
       [
         0,
-        5
+        4
       ],
       [
         0,
-        5
+        4
       ],
       [
-        6,
+        5,
         11
       ]
-    ],
-    "needs_review": true,
-    "_note": "Notebook piece - verify"
+    ]
   },
   "BachJS__BWV516__BWV-516_synth": {
     "bars": 18,
