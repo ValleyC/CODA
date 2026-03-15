@@ -58,10 +58,13 @@ class LogSpectrogram(nn.Module):
             if inp_.dim() == 1:
                 # compute stft if input is raw audio
                 x_stft = torch.stft(inp_, n_fft=self.n_fft, hop_length=self.hop_length, window=self.window,
-                                    center=False, return_complex=False)
-            elif inp_.dim() == 3:
-                # input is stft in real format (freq, time, 2)
+                                    center=False, return_complex=True)
+            elif inp_.dim() == 2 and inp_.is_complex():
+                # input is already complex stft
                 x_stft = inp_
+            elif inp_.dim() == 3:
+                # input is stft in real format (freq, time, 2) — convert
+                x_stft = torch.view_as_complex(inp_.contiguous())
             else:
                 x_stft = inp_
 
@@ -71,18 +74,14 @@ class LogSpectrogram(nn.Module):
                 if random.random() < self.aug_prob:
                     rate = random.uniform(self.min_rate, self.max_rate)
                     try:
-                        # Convert to complex for phase_vocoder
-                        x_stft_complex = torch.view_as_complex(x_stft.contiguous())
                         phase_adv = self.phase_advance.squeeze(-1)
-                        x_stft_complex = torchaudio.functional.phase_vocoder(x_stft_complex, rate, phase_adv)
-                        # Convert back to real format
-                        x_stft = torch.view_as_real(x_stft_complex)
+                        x_stft = torchaudio.functional.phase_vocoder(x_stft, rate, phase_adv)
                     except RuntimeError:
                         # Skip tempo augmentation if shape mismatch
                         pass
 
-            # magnitude = sqrt(real^2 + imag^2)
-            x_spec = x_stft.pow(2).sum(-1).sqrt().T
+            # magnitude
+            x_spec = x_stft.abs().T
 
             # apply logarithmic filterbank
             x_spec = torch.log10(torch.matmul(x_spec, self.fbank) + 1)
