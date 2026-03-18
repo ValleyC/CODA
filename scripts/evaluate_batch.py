@@ -63,6 +63,8 @@ def run_evaluate(piece_name, args, metrics_path):
         cmd.extend(['--output_dir', args.video_dir])
     else:
         cmd.append('--no_video')
+    if args.benchmark:
+        cmd.append('--benchmark')
     if args.break_mode:
         cmd.append('--break_mode')
         if args.break_onset_threshold is not None:
@@ -171,6 +173,31 @@ def aggregate_metrics(all_metrics):
     diffs = [m['mean_frame_diff_px'] for m in all_metrics
              if m.get('mean_frame_diff_px') is not None]
     summary['mean_frame_diff_px'] = float(np.mean(diffs)) if diffs else None
+
+    # ── Benchmark metrics ─────────────────────────────────────────
+    bench_metrics = [m['benchmark'] for m in all_metrics if 'benchmark' in m]
+    if bench_metrics:
+        # Weight by number of frames for fair averaging
+        total_bench_frames = sum(b['n_frames'] for b in bench_metrics)
+        if total_bench_frames > 0:
+            w_mean_total = sum(b['mean_total_ms'] * b['n_frames'] for b in bench_metrics) / total_bench_frames
+            w_mean_audio = sum(b['mean_audio_ms'] * b['n_frames'] for b in bench_metrics) / total_bench_frames
+            w_mean_backbone = sum(b['mean_backbone_ms'] * b['n_frames'] for b in bench_metrics) / total_bench_frames
+            w_mean_heads = sum(b['mean_heads_ms'] * b['n_frames'] for b in bench_metrics) / total_bench_frames
+            fps = 1000.0 / w_mean_total if w_mean_total > 0 else float('inf')
+
+            summary['benchmark'] = {
+                'n_pieces': len(bench_metrics),
+                'total_frames': total_bench_frames,
+                'mean_total_ms': float(w_mean_total),
+                'mean_audio_ms': float(w_mean_audio),
+                'mean_backbone_ms': float(w_mean_backbone),
+                'mean_heads_ms': float(w_mean_heads),
+                'fps': float(fps),
+                'realtime_factor': float(fps / 20.0),  # target 20 FPS
+                'per_piece_fps': [b['fps_mean'] for b in bench_metrics],
+                'per_piece_ms': [b['mean_total_ms'] for b in bench_metrics],
+            }
 
     return summary
 
@@ -308,6 +335,9 @@ if __name__ == '__main__':
                         help='Output directory for videos')
     parser.add_argument('--pieces', type=str, nargs='+', default=None,
                         help='Only evaluate these specific pieces (by name)')
+    # Benchmark
+    parser.add_argument('--benchmark', action='store_true',
+                        help='Measure per-frame inference latency across all pieces')
 
     args = parser.parse_args()
 
@@ -345,6 +375,31 @@ if __name__ == '__main__':
     if summary.get('total_jumps'):
         print_summary(summary, label=args.label)
         print_latex_row(summary, label=args.label or "Method")
+
+    # Print benchmark results
+    if summary.get('benchmark'):
+        b = summary['benchmark']
+        print(f"\n{'='*70}")
+        print(f"  [Benchmark] Inference Throughput")
+        print(f"{'='*70}")
+        print(f"  Pieces: {b['n_pieces']}   Frames: {b['total_frames']}")
+        print(f"  --- Mean per-frame latency (ms, weighted by frames) ---")
+        print(f"    Total:    {b['mean_total_ms']:.2f} ms")
+        print(f"    Audio:    {b['mean_audio_ms']:.2f} ms")
+        print(f"    Backbone: {b['mean_backbone_ms']:.2f} ms")
+        print(f"    Heads:    {b['mean_heads_ms']:.2f} ms")
+        print(f"  --- Throughput ---")
+        print(f"    {b['fps']:.1f} FPS  |  Real-time factor: {b['realtime_factor']:.1f}x")
+        print(f"  --- Per-piece FPS range ---")
+        fps_arr = np.array(b['per_piece_fps'])
+        print(f"    Min: {fps_arr.min():.1f}  Max: {fps_arr.max():.1f}  "
+              f"Std: {fps_arr.std():.1f}")
+        print(f"{'='*70}")
+
+        # Comparison line for manuscript
+        print(f"\n  For manuscript: {b['mean_total_ms']:.2f} ms/frame "
+              f"({b['fps']:.0f} FPS) on [GPU model]")
+        print(f"  cf. CYOLO (Henkel 2021): 6.03 ms/frame (166 FPS) on GTX 1080")
 
     if failed:
         print(f"\n  Failed pieces ({len(failed)}):")

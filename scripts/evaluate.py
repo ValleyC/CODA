@@ -30,6 +30,7 @@ Usage:
 
 import os
 import cv2
+import time
 import torch
 import numpy as np
 import matplotlib.cm as cm
@@ -226,6 +227,10 @@ if __name__ == '__main__':
                         help='Skip video generation (faster batch evaluation)')
     parser.add_argument('--save_metrics', type=str, default=None,
                         help='Save jump recovery metrics to JSON file')
+    parser.add_argument('--benchmark', action='store_true',
+                        help='Measure per-frame inference latency (ms) and report FPS')
+    parser.add_argument('--benchmark_warmup', type=int, default=50,
+                        help='Number of warmup frames to skip in benchmark timing')
 
     args = parser.parse_args()
 
@@ -381,6 +386,13 @@ if __name__ == '__main__':
 
     network.reset_tracking_state()
 
+    # ── Benchmark timing ─────────────────────────────────────────────────
+    _bench_times_total = []     # full pipeline per frame
+    _bench_times_audio = []     # audio processing (spec + conditioning)
+    _bench_times_backbone = []  # backbone forward
+    _bench_times_heads = []     # cascade heads (system + bar + note)
+    _bench_frame_counter = 0
+
     # ── Build frame iterator ─────────────────────────────────────────────
     # For jump-augmented data: iterate through precomputed sequences
     # For normal data: iterate linearly through audio frames
@@ -458,7 +470,18 @@ if __name__ == '__main__':
             raw_audio = signal_np[from_:from_ + HOP_SIZE]
             break_diag = network.update_break_mode(signal_np[from_:to_])
 
+        _do_bench = args.benchmark and _bench_frame_counter >= args.benchmark_warmup
+
+        if _do_bench:
+            torch.cuda.synchronize()
+            _t_total_start = time.perf_counter()
+
         with torch.no_grad():
+            # --- Audio processing ---
+            if _do_bench:
+                torch.cuda.synchronize()
+                _t0 = time.perf_counter()
+
             spec_frame = network.compute_spec([sig_excerpt], tempo_aug=False)[0]
             z, hidden = cond_net.get_conditioning(spec_frame, hidden=hidden)
 
@@ -477,23 +500,50 @@ if __name__ == '__main__':
                 audio_seq = None
                 audio_lengths = None
 
+            if _do_bench:
+                torch.cuda.synchronize()
+                _bench_times_audio.append(time.perf_counter() - _t0)
+
+            # --- Backbone ---
+            if _do_bench:
+                torch.cuda.synchronize()
+                _t0 = time.perf_counter()
+
             p3, _ = network.backbone(
                 score_tensor[actual_page:actual_page + 1], z
             )
 
-            # Get page metadata scaled to model input space
+            if _do_bench:
+                torch.cuda.synchronize()
+                _bench_times_backbone.append(time.perf_counter() - _t0)
+
+            # --- Cascade heads ---
             pm = page_meta.get(actual_page)
             if pm is not None:
                 sys_boxes = torch.from_numpy(pm['system_boxes'] / scale_factor).to(device)
                 bar_boxes = torch.from_numpy(pm['bar_boxes'] / scale_factor).to(device)
                 bps = pm['bars_per_system']
 
+                if _do_bench:
+                    torch.cuda.synchronize()
+                    _t0 = time.perf_counter()
+
                 result = network.inference_forward(
                     p3, z, sys_boxes, bar_boxes, bps,
                     audio_seq=audio_seq, audio_lengths=audio_lengths,
                 )
+
+                if _do_bench:
+                    torch.cuda.synchronize()
+                    _bench_times_heads.append(time.perf_counter() - _t0)
             else:
                 result = None
+
+        if _do_bench:
+            torch.cuda.synchronize()
+            _bench_times_total.append(time.perf_counter() - _t_total_start)
+
+        _bench_frame_counter += 1
 
         # ── Computation: extract predictions and record metrics ─────
         center_y, center_x = true_position_xy
@@ -839,6 +889,58 @@ if __name__ == '__main__':
         with open(args.save_metrics, 'w') as f:
             json.dump(metrics, f, indent=2)
         print(f"Metrics saved to {args.save_metrics}")
+
+    # ── Benchmark results ─────────────────────────────────────────────
+    if args.benchmark and _bench_times_total:
+        n = len(_bench_times_total)
+        total_ms = np.array(_bench_times_total) * 1000
+        audio_ms = np.array(_bench_times_audio) * 1000 if _bench_times_audio else np.array([0])
+        backbone_ms = np.array(_bench_times_backbone) * 1000 if _bench_times_backbone else np.array([0])
+        heads_ms = np.array(_bench_times_heads) * 1000 if _bench_times_heads else np.array([0])
+
+        mean_total = total_ms.mean()
+        fps = 1000.0 / mean_total if mean_total > 0 else float('inf')
+
+        print(f"\n{'='*60}")
+        print(f"[Benchmark] {piece_name}")
+        print(f"{'='*60}")
+        print(f"  Frames timed: {n} (after {args.benchmark_warmup} warmup)")
+        print(f"  --- Per-frame latency (ms) ---")
+        print(f"    Total:    {mean_total:.2f} mean | {np.median(total_ms):.2f} median | {np.std(total_ms):.2f} std")
+        print(f"    Audio:    {audio_ms.mean():.2f} mean | {np.median(audio_ms):.2f} median")
+        print(f"    Backbone: {backbone_ms.mean():.2f} mean | {np.median(backbone_ms):.2f} median")
+        print(f"    Heads:    {heads_ms.mean():.2f} mean | {np.median(heads_ms):.2f} median")
+        print(f"  --- Throughput ---")
+        print(f"    {fps:.1f} FPS (mean)  |  {1000.0/np.median(total_ms):.1f} FPS (median)")
+        print(f"    Real-time factor: {fps / FPS:.2f}x (target: {FPS} FPS)")
+        print(f"  --- Percentiles (total, ms) ---")
+        for p in [50, 90, 95, 99]:
+            print(f"    p{p}: {np.percentile(total_ms, p):.2f}")
+        print(f"{'='*60}")
+
+        # Add to metrics dict
+        metrics['benchmark'] = {
+            'n_frames': n,
+            'warmup_frames': args.benchmark_warmup,
+            'mean_total_ms': float(mean_total),
+            'median_total_ms': float(np.median(total_ms)),
+            'std_total_ms': float(np.std(total_ms)),
+            'mean_audio_ms': float(audio_ms.mean()),
+            'mean_backbone_ms': float(backbone_ms.mean()),
+            'mean_heads_ms': float(heads_ms.mean()),
+            'fps_mean': float(fps),
+            'fps_median': float(1000.0 / np.median(total_ms)),
+            'realtime_factor': float(fps / FPS),
+            'p50_ms': float(np.percentile(total_ms, 50)),
+            'p90_ms': float(np.percentile(total_ms, 90)),
+            'p95_ms': float(np.percentile(total_ms, 95)),
+            'p99_ms': float(np.percentile(total_ms, 99)),
+        }
+
+        # Re-save metrics with benchmark data
+        if args.save_metrics:
+            with open(args.save_metrics, 'w') as f:
+                json.dump(metrics, f, indent=2)
 
     # ── Video generation ──────────────────────────────────────────────
     if not args.no_video:
