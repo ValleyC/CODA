@@ -361,6 +361,13 @@ if __name__ == '__main__':
         m = run_evaluate(piece, args, metrics_path)
         if m is not None:
             all_metrics.append(m)
+            # Show inline per-piece summary
+            parts = [f"  sys={m.get('sys_accuracy', 0):.3f}",
+                     f"bar={m.get('bar_accuracy', 0):.3f}"]
+            if 'benchmark' in m:
+                b = m['benchmark']
+                parts.append(f"{b['fps_mean']:.0f} FPS ({b['mean_total_ms']:.2f} ms/frame)")
+            print(f"  -> {' | '.join(parts)}")
         else:
             failed.append(piece)
 
