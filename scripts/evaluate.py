@@ -47,7 +47,7 @@ import json
 C_GT          = (30, 120, 200)     # muted rust/brown
 C_GT_SYS      = (160, 130, 40)    # slate blue
 C_GT_BAR      = (130, 50, 160)    # plum
-C_PRED        = (180, 90, 40)     # steel blue
+C_PRED        = (60, 60, 220)     # warm coral-red
 C_PRED_SYS    = (50, 160, 90)     # forest green
 C_PRED_BAR    = (170, 120, 30)    # dark teal
 C_INFO_BG     = (30, 30, 30)      # near-black
@@ -620,9 +620,9 @@ if __name__ == '__main__':
             overlay_box(img, bx1, by1, bx2, by2, C_GT_BAR, alpha=0.10,
                         border_thickness=1, label="GT Bar")
 
-            # -- GT cursor: vertical line + glowing dot --
-            draw_cursor(img, gt_x, sys_y1, sys_y2, C_GT, dot_cy=gt_y,
-                        radius=5, label="GT")
+            # -- GT note: dot only (no vertical line) for clear distinction --
+            cv2.circle(img, (int(gt_x), int(gt_y)), 7, C_GT, 1, cv2.LINE_AA)
+            cv2.circle(img, (int(gt_x), int(gt_y)), 5, C_GT, -1, cv2.LINE_AA)
 
             # -- Jump/silence indicator --
             if has_sequences and is_silence:
@@ -643,8 +643,7 @@ if __name__ == '__main__':
                     psy2 = sb[1] + sb[3] / 2
                     pred_sys_y1, pred_sys_y2 = psy1, psy2
                     overlay_box(img, psx1, psy1, psx2, psy2, C_PRED_SYS, alpha=0.08,
-                                border_thickness=2,
-                                label=f"Pred Sys {sys_idx} ({best['sys_lp']:.1f})")
+                                border_thickness=2, label="Pred Sys")
 
                 # -- Predicted bar box --
                 if bar_page_idx < pm['bar_boxes'].shape[0]:
@@ -654,31 +653,12 @@ if __name__ == '__main__':
                     pbx2 = bb[0] + bb[2] / 2 - pad
                     pby2 = bb[1] + bb[3] / 2
                     overlay_box(img, pbx1, pby1, pbx2, pby2, C_PRED_BAR, alpha=0.10,
-                                border_thickness=2,
-                                label=f"Pred Bar {bar_page_idx} ({best['bar_lp']:.1f})")
+                                border_thickness=2, label="Pred Bar")
 
                 # -- Predicted cursor: vertical line + glowing dot --
                 draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
                             dot_cy=pred_y, radius=7, label="Pred")
 
-                # -- Info panel --
-                info = {
-                    'System': f"{sys_idx} (lp={best['sys_lp']:.2f})",
-                    'Bar': f"{bar_page_idx} (lp={best['bar_lp']:.2f})",
-                    'Error': f"{frame_diff:.1f} px" if frame_diff is not None else "—",
-                    'Mean Err': f"{np.mean(frame_diffs):.1f} px" if frame_diffs else "—",
-                    'Frame': f"{total_frames}",
-                }
-                # Break mode diagnostics
-                if network.break_mode_enabled:
-                    ne = break_diag['norm_energy']
-                    ne_str = 'warmup' if ne < 0 else f"{ne:.2f}"
-                    brk_status = 'SILENCE' if break_diag['in_silence'] else (
-                        f"GRACE({break_diag['grace_frames_remaining']})"
-                        if break_diag['is_break_mode'] else 'off')
-                    info['Break'] = brk_status
-                    info['Energy'] = ne_str
-                draw_info_panel(img, info)
 
             # -- Rolling spectrogram side panel --
             if vis_spec is not None:
