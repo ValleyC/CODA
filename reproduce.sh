@@ -8,10 +8,9 @@ set -e
 # 1. Environment setup
 # ============================================================
 echo "=== Setting up environment ==="
-conda create -n coda python=3.10 -y
+conda env create -f environment.yml
 conda activate coda
-pip install -r requirements.txt
-pip install -e .
+bash install.sh
 
 # ============================================================
 # 2. Data preparation

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+
+# Environment
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data and checkpoints (downloaded separately)
+data/msmd/
+pretrained/
+params/
+
+# Output artifacts
+results/
+videos/*.mp4
+gt_vis/
+
+# Logs
+*.log
+wandb/
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
