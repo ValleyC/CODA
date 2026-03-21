@@ -657,7 +657,7 @@ if __name__ == '__main__':
 
                 # -- Predicted cursor: vertical line + glowing dot --
                 draw_cursor(img, pred_x, pred_sys_y1, pred_sys_y2, C_PRED,
-                            dot_cy=pred_y, radius=7, label="Pred")
+                            dot_cy=pred_y, radius=7, label="Pred Note")
 
 
             # -- Rolling spectrogram side panel --
