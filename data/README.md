@@ -37,7 +37,7 @@ Each `.npz` file contains:
 
 ### Repeat-Aware Jump-Augmented Test Set
 
-Download the pre-built jump-augmented test set directly:
+Download the [pre-built jump-augmented test set](https://drive.google.com/file/d/12hDvbjYfrRLACsh45mQaOA4tiFcIobTo/view?usp=sharing) directly:
 ```bash
 pip install gdown
 gdown https://drive.google.com/uc?id=12hDvbjYfrRLACsh45mQaOA4tiFcIobTo -O data/msmd_test_jump.zip
