@@ -621,31 +621,13 @@ class SelectionCascadeModel(nn.Module):
                 if self._break_mode_active:
                     bar_tp *= self.break_prior_scale
 
-                # Note regression for this bar
-                bar_roi = bar_rois[bar_local].unsqueeze(0)
-                note_pos, _ = self.note_head(p3, bar_roi, z, spatial_scale=spatial_scale)
-                note_cx, note_cy = note_pos[0].tolist()
-
-                # Note confidence is NOT trained, so exclude from scoring
                 joint_score = sys_lp + sys_tp + bar_score + bar_tp
-
-                # Map note to page coords
-                bar_box = bar_boxes_xywh[bar_page_idx]
-                bar_x1 = (bar_box[0] - bar_box[2] / 2).item()
-                bar_y1 = (bar_box[1] - bar_box[3] / 2).item()
-                bar_w = bar_box[2].item()
-                bar_h = bar_box[3].item()
-                page_x = bar_x1 + note_cx * bar_w
-                page_y = bar_y1 + note_cy * bar_h
 
                 paths.append({
                     'system_idx': sys_i,
                     'bar_page_idx': bar_page_idx,
                     'bar_local_idx': bar_local,
-                    'note_cx': note_cx,
-                    'note_cy': note_cy,
-                    'page_x': page_x,
-                    'page_y': page_y,
+                    'bar_roi': bar_rois[bar_local].unsqueeze(0),
                     'score': joint_score,
                     'sys_lp': sys_lp,
                     'bar_lp': bar_score,
@@ -655,6 +637,19 @@ class SelectionCascadeModel(nn.Module):
             return None
 
         best = max(paths, key=lambda p: p['score'])
+
+        # Evaluate note head only on the winning path
+        note_pos, _ = self.note_head(p3, best['bar_roi'], z, spatial_scale=spatial_scale)
+        note_cx, note_cy = note_pos[0].tolist()
+        bar_box = bar_boxes_xywh[best['bar_page_idx']]
+        bar_x1 = (bar_box[0] - bar_box[2] / 2).item()
+        bar_y1 = (bar_box[1] - bar_box[3] / 2).item()
+        bar_w = bar_box[2].item()
+        bar_h = bar_box[3].item()
+        best['note_cx'] = note_cx
+        best['note_cy'] = note_cy
+        best['page_x'] = bar_x1 + note_cx * bar_w
+        best['page_y'] = bar_y1 + note_cy * bar_h
 
         # Freeze state during silence -- predictions are noisy without audio evidence.
         # During grace window (audio resumed, break still active): commit normally.

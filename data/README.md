@@ -37,7 +37,14 @@ Each `.npz` file contains:
 
 ### Repeat-Aware Jump-Augmented Test Set
 
-Generate the jump-augmented test benchmark for discontinuity recovery evaluation:
+Download the pre-built jump-augmented test set directly:
+```bash
+pip install gdown
+gdown https://drive.google.com/uc?id=12hDvbjYfrRLACsh45mQaOA4tiFcIobTo -O data/msmd_test_jump.zip
+unzip data/msmd_test_jump.zip -d data/msmd/
+```
+
+Alternatively, generate it from the base MSMD test set:
 ```bash
 python scripts/generate_repeat_test.py \
     --input_dir data/msmd/msmd_test \
