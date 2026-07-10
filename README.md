@@ -221,10 +221,11 @@ Pre-trained checkpoints will be released upon paper acceptance.
 ## Citation
 
 ```bibtex
-@inproceedings{coda2026,
-  title={CODA: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following},
-  author={Anonymous},
-  booktitle={Proceedings of the International Society for Music Information Retrieval Conference (ISMIR)},
+@inproceedings{yang2026coda,
+  title={{CODA}: Cascaded Online Discontinuity-Aware Alignment for Real-Time Score Following},
+  author={Yang, Yining and Chen, Ruogu and Han, Jie},
+  booktitle={Proceedings of the 27th International Society for Music Information Retrieval Conference (ISMIR)},
+  address={Abu Dhabi, UAE},
   year={2026}
 }
 ```
