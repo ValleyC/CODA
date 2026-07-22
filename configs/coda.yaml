@@ -52,6 +52,7 @@ head:
 
 # Selection-specific configuration
 cascade_config:
+  conditioning_grad_clip: 1.0
   # ROI sizes for each cascade stage
   system_roi_size: [4, 24]
   bar_roi_size: [4, 8]
@@ -67,7 +68,8 @@ cascade_config:
   # Temporal prior weights (log-space)
   system_transition:
     same: 0.0
-    adjacent: -1.0
+    forward_1: -1.0
+    backward_1: -2.0
     far: -5.0
   bar_transition:
     stay: 0.0
@@ -75,6 +77,10 @@ cascade_config:
     forward_2: -1.5
     backward_1: -2.0
     far: -5.0
+
+  # Weight of the normalized transition log-probability relative to the
+  # audio/visual emission logits.
+  transition_prior_strength: 1.0
 
   # System head: SelectionHeadV2 with cross-attention over Mamba audio buffer
   head_v2:
@@ -102,7 +108,7 @@ cascade_config:
     release_threshold: 0.25        # exit silence when normalized energy rises above this
     energy_window: 100             # frames for running mean/std normalization
     min_history: 10                # frames before detection activates
-    silence_onset_frames: 3        # ~150ms at 20fps before entering break mode
+    silence_onset_frames: 2        # ~100ms at 20fps; matches fixed repeat benchmark
     grace_frames: 8                # ~400ms after audio resumes for relocalization
     prior_scale: 0.0               # 0 = full suppression during break
     beam_k_systems: -1             # -1 = all systems during break

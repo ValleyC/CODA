@@ -1,14 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # CODA: Full reproduction script
 # This script downloads data, trains the model, and evaluates it.
 
-set -e
+set -Eeuo pipefail
 
 # ============================================================
 # 1. Environment setup
 # ============================================================
 echo "=== Setting up environment ==="
-conda env create -f environment.yml
+CONDA_BASE=$(conda info --base)
+# `conda activate` is a shell function and is unavailable in many clean,
+# non-interactive shells until this hook is sourced explicitly.
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+if conda env list | awk '{print $1}' | grep -qx coda; then
+    conda env update --name coda --file environment.yml
+else
+    conda env create --file environment.yml
+fi
 conda activate coda
 bash install.sh
 
@@ -26,90 +35,10 @@ fi
 cd ..
 
 # ============================================================
-# 3. Training Phase 1: Ground-truth routing
+# 3. Full training and evaluation
 # ============================================================
-echo "=== Training Phase 1 ==="
-python scripts/train.py \
-    --config configs/coda.yaml \
-    --train_sets data/msmd/msmd_train \
-    --val_sets data/msmd/msmd_valid \
-    --tag coda_phase1 \
-    --temporal_priors \
-    --augment \
-    --batch_size 16 \
-    --num_epochs 30 \
-    --lr 5e-4 \
-    --num_workers 4
-
-# Find Phase 1 best checkpoint
-PHASE1_DIR=$(ls -td params/*coda_phase1* | head -1)
-echo "Phase 1 best model: ${PHASE1_DIR}/best_model.pt"
-
-# ============================================================
-# 4. Training Phase 2: Scheduled sampling
-# ============================================================
-echo "=== Training Phase 2 ==="
-python scripts/train.py \
-    --config configs/coda.yaml \
-    --train_sets data/msmd/msmd_train \
-    --val_sets data/msmd/msmd_valid \
-    --param_path ${PHASE1_DIR}/best_model.pt \
-    --tag coda_phase2 \
-    --temporal_priors \
-    --augment \
-    --scheduled_sampling \
-    --ss_max_p 0.7 \
-    --ss_ramp_epochs 5 \
-    --batch_size 16 \
-    --num_epochs 20 \
-    --lr 1e-4 \
-    --num_workers 4
-
-PHASE2_DIR=$(ls -td params/*coda_phase2* | head -1)
-echo "Phase 2 best model: ${PHASE2_DIR}/best_model.pt"
-
-# ============================================================
-# 5. Evaluation
-# ============================================================
-echo "=== Evaluating on test set ==="
-for piece in data/msmd/msmd_test/*.npz; do
-    piece_name=$(basename "$piece" .npz)
-    echo "Evaluating: ${piece_name}"
-    python scripts/evaluate.py \
-        --param_path ${PHASE2_DIR}/best_model.pt \
-        --test_dir data/msmd/msmd_test \
-        --test_piece ${piece_name} \
-        --output_dir results/
-done
-
-# ============================================================
-# 6. Jump Recovery Evaluation
-# ============================================================
-echo "=== Generating repeat-aware jump-augmented test data ==="
-python scripts/generate_repeat_test.py \
-    --input_dir data/msmd/msmd_test \
-    --output_dir data/msmd/msmd_test_jump \
-    --annotations data/repeat_annotations.json \
-    --seed 42
-
-echo "=== Evaluating jump recovery (repeat subset) ==="
-python scripts/evaluate_batch.py \
-    --param_path ${PHASE2_DIR}/best_model.pt \
-    --test_dir data/msmd/msmd_test_jump/repeat \
-    --break_mode \
-    --label "CODA (full) - repeat subset" \
-    --metrics_dir results/metrics/repeat \
-    --save_summary results/repeat_summary.json \
-    --with_video --video_dir results/jump_repeat/ --video_workers 4
-
-echo "=== Evaluating jump recovery (random subset) ==="
-python scripts/evaluate_batch.py \
-    --param_path ${PHASE2_DIR}/best_model.pt \
-    --test_dir data/msmd/msmd_test_jump/random \
-    --break_mode \
-    --label "CODA (full) - random subset" \
-    --metrics_dir results/metrics/random \
-    --save_summary results/random_summary.json \
-    --with_video --video_dir results/jump_random/ --video_workers 4
-
-echo "=== Done! Results saved to results/ ==="
+# This uses only msmd_train for optimization and msmd_valid for model
+# selection. It produces atomic resume checkpoints, regenerates the fixed
+# 66-piece annotated and 28-piece random jump sets in clean directories, and
+# evaluates msmd_test only after both training phases are complete.
+bash scripts/run_full_pipeline.sh

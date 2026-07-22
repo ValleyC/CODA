@@ -14,6 +14,13 @@ dependencies:
     - cython==3.2.4
     - numpy==1.26.4
     - scipy==1.15.3
+    # Explicit transitive dependencies keep PYTHONNOUSERSITE=1 environments
+    # self-contained even when a pre-existing conda package satisfied pip's
+    # resolver without installing the corresponding Python distribution.
+    - mpmath==1.3.0
+    - joblib==1.5.3
+    - regex==2026.7.19
+    - cycler==0.12.1
     - librosa==0.11.0
     - einops==0.8.2
     - "madmom @ git+https://github.com/CPJKU/madmom.git"

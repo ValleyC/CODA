@@ -18,6 +18,7 @@ Usage:
 
 import os
 import json
+import hashlib
 import random
 import shutil
 import argparse
@@ -25,7 +26,11 @@ import numpy as np
 from typing import List, Dict, Tuple
 
 from coda.utils.data_utils import load_piece, FPS, SAMPLE_RATE, FRAME_SIZE, HOP_SIZE
-from coda.utils.general import xywh2xyxy
+from coda.utils.general import (
+    isolated_python_numpy_seed,
+    stable_named_seed,
+    xywh2xyxy,
+)
 
 from generate_jump_test_data import (
     build_sequences, build_jump_indices, select_jump_types,
@@ -227,18 +232,26 @@ def generate_random_jump_sequence(
     # Build indices for destination sampling
     system_map, page_map = build_jump_indices(sequences)
 
-    # Select diverse jump types
-    jump_types = select_jump_types(min_jumps, is_multi_page)
+    # Make each piece independent of processing order, skipped neighbors, and
+    # whether it is generated alone or as part of the full benchmark. Python's
+    # built-in hash is intentionally randomized between processes, so derive a
+    # stable seed from SHA-256 instead.
+    piece_seed = stable_named_seed(seed, piece_name)
+    with isolated_python_numpy_seed(piece_seed):
+        # Select diverse jump types
+        jump_types = select_jump_types(min_jumps, is_multi_page)
 
-    # Select well-separated jump positions
-    min_gap_frames = int(min_gap_sec * FPS)
-    jump_positions = select_jump_positions(sequences, min_jumps, min_gap_frames)
+        # Select well-separated jump positions
+        min_gap_frames = int(min_gap_sec * FPS)
+        jump_positions = select_jump_positions(
+            sequences, min_jumps, min_gap_frames
+        )
 
-    # Inject jumps with random silence durations
-    output_seqs, jumps = inject_jumps(
-        sequences, system_map, page_map, jump_types, jump_positions,
-        seed=seed
-    )
+        # Inject jumps with random silence durations
+        output_seqs, jumps = inject_jumps(
+            sequences, system_map, page_map, jump_types, jump_positions,
+            seed=piece_seed
+        )
 
     return output_seqs, jumps
 
@@ -293,18 +306,30 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--piece_name', type=str, default=None,
                         help='Process a single piece (for testing)')
+    parser.add_argument('--clean_output', action='store_true',
+                        help='Remove previously generated .npz/.wav files before a full run')
 
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    with open(args.annotations) as f:
-        annotations = json.load(f)
+    with open(args.annotations, 'rb') as f:
+        annotation_bytes = f.read()
+    annotations = json.loads(annotation_bytes)
+    annotation_sha256 = hashlib.sha256(annotation_bytes).hexdigest()
 
     repeat_dir = os.path.join(args.output_dir, 'repeat')
     random_dir = os.path.join(args.output_dir, 'random')
     os.makedirs(repeat_dir, exist_ok=True)
     os.makedirs(random_dir, exist_ok=True)
+
+    if args.clean_output:
+        if args.piece_name:
+            parser.error('--clean_output cannot be combined with --piece_name')
+        for output_dir in (repeat_dir, random_dir):
+            for filename in os.listdir(output_dir):
+                if filename.endswith(('.npz', '.wav')):
+                    os.remove(os.path.join(output_dir, filename))
 
     # Get piece list
     if args.piece_name:
@@ -316,6 +341,8 @@ def main():
     n_repeat = 0
     n_random = 0
     n_skipped = 0
+    repeat_piece_names = []
+    random_piece_names = []
 
     for piece_name in piece_names:
         ann = annotations.get(piece_name)
@@ -341,6 +368,7 @@ def main():
                                  args.scale_width, jump_metadata=jump_metadata)
                     copy_wav(args.input_dir, repeat_dir, piece_name)
                     n_repeat += 1
+                    repeat_piece_names.append(piece_name)
                     for j in jump_metadata:
                         print(f"    [repeat] bar {j['src_bar']}->{j['dest_bar']} "
                               f"silence={j['silence_frames']}f")
@@ -365,6 +393,7 @@ def main():
                                  args.scale_width, jump_metadata=jump_metadata)
                     copy_wav(args.input_dir, random_dir, piece_name)
                     n_random += 1
+                    random_piece_names.append(piece_name)
                     # Print jump summary
                     for j in jump_metadata:
                         same = "same-page" if j['same_page'] else f"page {j['src_page']}->{j['dest_page']}"
@@ -392,11 +421,38 @@ def main():
         'random_min_jumps': args.min_jumps,
         'random_min_gap_sec': args.min_gap_sec,
         'seed': args.seed,
+        'annotation_sha256': annotation_sha256,
+        'repeat_piece_names': repeat_piece_names,
+        'random_piece_names': random_piece_names,
+        'random_piece_seeds': {
+            name: stable_named_seed(args.seed, name)
+            for name in random_piece_names
+        },
     }
     manifest_path = os.path.join(args.output_dir, 'manifest.json')
     with open(manifest_path, 'w') as f:
         json.dump(manifest, f, indent=2)
     print(f"  Manifest: {manifest_path}")
+
+    if not args.piece_name:
+        expected_repeat = [
+            name for name in piece_names
+            if isinstance(annotations.get(name), dict)
+            and annotations[name].get('has_repeats', False)
+            and annotations[name].get('performance_order')
+        ]
+        expected_random = [
+            name for name in piece_names
+            if isinstance(annotations.get(name), dict) and name not in expected_repeat
+        ]
+        if (repeat_piece_names != expected_repeat
+                or random_piece_names != expected_random
+                or n_skipped != 0):
+            raise RuntimeError(
+                "Benchmark generation was incomplete; refusing to accept a "
+                f"partial manifest (repeat {n_repeat}/{len(expected_repeat)}, "
+                f"random {n_random}/{len(expected_random)}, skipped {n_skipped})"
+            )
 
 
 if __name__ == '__main__':

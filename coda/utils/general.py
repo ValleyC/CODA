@@ -1,9 +1,53 @@
+from contextlib import contextmanager
+import hashlib
 import math
+import random
+from functools import lru_cache
+
 import librosa
+import soundfile as sf
 import torch
 import yaml
 
 import numpy as np
+
+
+def stable_named_seed(base_seed, name):
+    """Derive a process-independent uint32 seed for one named artifact."""
+    payload = f"{int(base_seed)}\0{name}".encode("utf-8")
+    digest = hashlib.sha256(payload).digest()
+    return int.from_bytes(digest[:8], byteorder="big") % (2 ** 32)
+
+
+@contextmanager
+def isolated_python_numpy_seed(seed):
+    """Use deterministic local RNG streams without perturbing the caller."""
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    random.seed(int(seed))
+    np.random.seed(int(seed))
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+
+
+@contextmanager
+def isolated_python_numpy_torch_seed(seed):
+    """Isolate all CPU RNGs commonly used by dataset augmentations."""
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    random.seed(int(seed))
+    np.random.seed(int(seed))
+    torch.manual_seed(int(seed))
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
 
 
 def load_yaml(config_file):
@@ -16,6 +60,37 @@ def load_yaml(config_file):
 def load_wav(audio_path, sr):
     signal, _ = librosa.load(audio_path, sr=sr)
 
+    return signal
+
+
+@lru_cache(maxsize=1024)
+def _soundfile_layout(audio_path):
+    info = sf.info(audio_path)
+    return info.samplerate, info.channels
+
+
+def load_wav_segment(audio_path, start, stop, sr):
+    """Read only a requested mono waveform interval.
+
+    MSMD audio is already mono at the model sample rate, so SoundFile can seek
+    directly instead of decoding the entire performance for every randomly
+    sampled training frame. A librosa fallback preserves support for other
+    sample rates and channel layouts.
+    """
+    start = max(0, int(start))
+    stop = max(start, int(stop))
+    sample_rate, channels = _soundfile_layout(audio_path)
+    if sample_rate == sr and channels == 1:
+        signal, _ = sf.read(
+            audio_path, start=start, stop=stop,
+            dtype='float32', always_2d=False,
+        )
+        return signal
+
+    offset = start / float(sr)
+    duration = (stop - start) / float(sr)
+    signal, _ = librosa.load(audio_path, sr=sr, mono=True,
+                             offset=offset, duration=duration)
     return signal
 
 
@@ -124,6 +199,8 @@ class AverageMeter(object):
         self.count = 0
 
     def update(self, val, n=1):
+        if not math.isfinite(float(val)):
+            raise ValueError(f"AverageMeter received non-finite value: {val}")
         self.val = val
         self.sum += val * n
         self.count += n

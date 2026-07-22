@@ -2,6 +2,7 @@ import cv2
 import os
 
 import numpy as np
+import soundfile as sf
 
 from collections import Counter
 from coda.utils.general import load_wav, xywh2xyxy
@@ -14,7 +15,7 @@ HOP_SIZE = 1102
 FPS = SAMPLE_RATE/HOP_SIZE
 
 
-def load_piece(path, piece_name, audio_name=None):
+def load_piece(path, piece_name, audio_name=None, load_audio=True):
     """
     Load a piece from .npz file.
 
@@ -45,7 +46,7 @@ def load_piece(path, piece_name, audio_name=None):
     if audio_name is None:
         audio_name = piece_name
     wav_path = os.path.join(path, audio_name + '.wav')
-    signal = load_wav(wav_path, sr=SAMPLE_RATE)
+    signal = load_wav(wav_path, sr=SAMPLE_RATE) if load_audio else wav_path
 
     onsets = []
     for i in range(len(coords)):
@@ -136,7 +137,7 @@ def load_sequences(params):
 
     # Full loading for primary pieces (original behavior)
     padded_scores, _, onsets, coords_new, bars, systems, interpol_fnc, signal, pad, synthesized = \
-        load_piece(path, piece_name, audio_name=audio_name)
+        load_piece(path, piece_name, audio_name=audio_name, load_audio=load_audio)
 
     scores = 1 - np.array(padded_scores, dtype=np.float32) / 255.
 
@@ -148,7 +149,13 @@ def load_sequences(params):
 
     scores = np.stack(scaled_score)
 
-    duration = signal.shape[0]
+    if isinstance(signal, (str, os.PathLike)):
+        audio_info = sf.info(signal)
+        duration = int(np.ceil(
+            audio_info.frames * SAMPLE_RATE / float(audio_info.samplerate)
+        ))
+    else:
+        duration = signal.shape[0]
     n_frames = int(np.ceil(FPS * duration / SAMPLE_RATE))
     piece_sequences = []
 

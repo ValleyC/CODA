@@ -169,9 +169,6 @@ class NoteHead(nn.Module):
         # Position regression (sigmoid output -> [0, 1] within bar)
         self.pos_head = nn.Linear(mid_channels, 2)
 
-        # Confidence head
-        self.conf_head = nn.Linear(mid_channels, 1)
-
     def forward(self, p3, bar_rois_page, z, spatial_scale=1.0/8):
         """
         Args:
@@ -182,31 +179,46 @@ class NoteHead(nn.Module):
 
         Returns:
             positions: [N, 2] (cx, cy) in [0, 1] within bar (sigmoid output)
-            confidences: [N, 1] confidence in [0, 1]
         """
         if bar_rois_page.shape[0] == 0:
-            return (torch.zeros(0, 2, device=p3.device),
-                    torch.zeros(0, 1, device=p3.device))
+            return torch.zeros(0, 2, device=p3.device)
 
-        # ROI align
-        roi_features = roi_align(p3, bar_rois_page, output_size=self.roi_size,
-                                  spatial_scale=spatial_scale)  # [N, C, H_roi, W_roi]
-
-        # FiLM conditioning (expand z per ROI based on batch index)
         batch_indices = bar_rois_page[:, 0].long()
-        z_per_roi = z[batch_indices]  # [N, zdim]
-        gamma = self.gamma(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        beta = self.beta(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        roi_features = gamma * roi_features + beta
+        autocast_dtype = (
+            torch.get_autocast_dtype('cuda')
+            if hasattr(torch, 'get_autocast_dtype')
+            else torch.get_autocast_gpu_dtype()
+        )
+        fp16_amp = (
+            p3.is_cuda
+            and torch.is_autocast_enabled()
+            and autocast_dtype == torch.float16
+        )
+        if fp16_amp:
+            # As in the selection heads, learned FiLM gains can overflow the
+            # following convolution's FP16 accumulation before normalization.
+            with torch.autocast(device_type='cuda', enabled=False):
+                roi_features = roi_align(
+                    p3.float(), bar_rois_page.float(), output_size=self.roi_size,
+                    spatial_scale=spatial_scale,
+                )
+                z_per_roi = z[batch_indices].float()
+                gamma = self.gamma(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+                beta = self.beta(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+                x = self.conv(gamma * roi_features + beta)
+        else:
+            roi_features = roi_align(
+                p3, bar_rois_page, output_size=self.roi_size,
+                spatial_scale=spatial_scale,
+            )
+            z_per_roi = z[batch_indices]
+            gamma = self.gamma(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+            beta = self.beta(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+            x = self.conv(gamma * roi_features + beta)
 
-        # Feature extraction
-        x = self.conv(roi_features)  # [N, mid_C, H_roi, W_roi]
         x = self.pool(x).flatten(1)  # [N, mid_C]
 
         # Position: sigmoid guarantees [0, 1] -- note is within bar by construction
         positions = torch.sigmoid(self.pos_head(x))  # [N, 2]
 
-        # Confidence
-        confidences = torch.sigmoid(self.conf_head(x))  # [N, 1]
-
-        return positions, confidences
+        return positions

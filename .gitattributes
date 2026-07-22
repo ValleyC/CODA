@@ -1,0 +1,4 @@
+# Shell scripts must remain executable on Linux when the repository is
+# checked out from Windows. Other source files retain the repository's
+# existing line-ending convention to avoid a noisy historical rewrite.
+*.sh text eol=lf

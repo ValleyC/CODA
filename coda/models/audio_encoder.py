@@ -8,6 +8,7 @@ followed by stacked Mamba SSM layers. Supports both parallel training
 
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 
 from coda.models.modules import Flatten, TemporalBatchNorm
 
@@ -33,7 +34,8 @@ class MambaConditioning(nn.Module):
     def __init__(self, zdim=128, n_mamba_layers=2, activation=nn.ELU,
                  freq_dim=78, hidden_size=64, groupnorm=False,
                  d_state=16, d_conv=4, expand=2, dropout=0.1,
-                 encoder_type='linear', normalize_input=False):
+                 encoder_type='linear', normalize_input=False,
+                 use_fast_path=True):
         super(MambaConditioning, self).__init__()
 
         if not HAS_MAMBA:
@@ -44,6 +46,7 @@ class MambaConditioning(nn.Module):
         self.freq_dim = freq_dim
         self.n_mamba_layers = n_mamba_layers
         self.normalize_input = normalize_input
+        self.use_fast_path = use_fast_path
 
         if isinstance(activation, str):
             activation = eval(activation)
@@ -89,7 +92,17 @@ class MambaConditioning(nn.Module):
 
         # Mamba layers
         self.mamba_layers = nn.ModuleList([
-            Mamba(d_model=hidden_size, d_state=d_state, d_conv=d_conv, expand=expand)
+            Mamba(
+                d_model=hidden_size,
+                d_state=d_state,
+                d_conv=d_conv,
+                expand=expand,
+                # Retain Mamba's parallel fused implementation for training;
+                # the recurrence itself runs in FP32 below, while the model's
+                # conditioning-boundary hook protects it from an exploding
+                # downstream Jacobian.
+                use_fast_path=use_fast_path,
+            )
             for _ in range(n_mamba_layers)
         ])
         self.mamba_dropout = nn.Dropout(dropout)
@@ -122,35 +135,41 @@ class MambaConditioning(nn.Module):
     def encode_sequence(self, specs, hidden=None):
         """Training: encode full sequences with parallel Mamba forward()."""
         lengths = [s.shape[0] for s in specs]
-        max_len = max(lengths)
-        batch_size = len(specs)
-
         # Apply input normalization BEFORE padding
         # LayerNorm normalizes per-frame, no batch statistics to contaminate
         if self.input_norm is not None:
             specs = [self.input_norm(s) for s in specs]
 
-        # Pad sequences (after normalization)
-        padded = torch.zeros(batch_size, max_len, self.freq_dim, device=specs[0].device)
-        for i, spec in enumerate(specs):
-            padded[i, :spec.shape[0]] = spec
+        # Pad after normalization. ``pad_sequence`` performs the copies in one
+        # vectorized operation instead of launching one slice assignment per
+        # sample, while preserving autograd into the normalized inputs.
+        padded = pad_sequence(specs, batch_first=True)
 
-        # Encode frames
+        # Encode frames. The dense frame projection remains AMP eligible; it is
+        # a conventional feed-forward block and accounts for most of the audio
+        # encoder's arithmetic on long sequences.
         encoded = self._encode_frames(padded)
 
-        # Mamba forward (parallel)
-        mamba_out = encoded
-        for mamba_layer, norm in zip(self.mamba_layers, self.mamba_norms):
-            residual = mamba_out
-            mamba_out = mamba_layer(mamba_out)
-            mamba_out = self.mamba_dropout(mamba_out)
-            mamba_out = norm(mamba_out + residual)
+        # Selective scans are recurrent numerical accumulations. With long
+        # (up to two-minute) training windows, running them in FP16 can produce
+        # a sample-local NaN even though both the waveform and spectrogram are
+        # finite. Keep the state-space recurrence and final conditioning
+        # projection in FP32 while allowing the surrounding visual network and
+        # frame projection to benefit from AMP.
+        with torch.autocast(device_type=encoded.device.type, enabled=False):
+            mamba_out = encoded.float()
+            for mamba_layer, norm in zip(self.mamba_layers, self.mamba_norms):
+                residual = mamba_out
+                mamba_out = mamba_layer(mamba_out)
+                mamba_out = self.mamba_dropout(mamba_out)
+                mamba_out = norm(mamba_out + residual)
 
-        # Get final z for each sequence
-        z_final = [mamba_out[i, length - 1] for i, length in enumerate(lengths)]
-        z = self.z_enc(torch.stack(z_final))
+            # Gather every sample's last valid state in one indexed operation.
+            lengths_tensor = torch.as_tensor(lengths, device=mamba_out.device)
+            rows = torch.arange(len(lengths), device=mamba_out.device)
+            z = self.z_enc(mamba_out[rows, lengths_tensor - 1])
 
-        return z, mamba_out, torch.tensor(lengths, device=z.device)
+        return z, mamba_out, lengths_tensor
 
     def _init_mamba_states(self, batch_size, device, dtype):
         """Initialize Mamba states for step mode."""

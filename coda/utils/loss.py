@@ -17,6 +17,7 @@ Supports:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 
 def _compute_ce_loss(logits_flat, counts, gt_indices, gt_valid, B,
@@ -26,50 +27,78 @@ def _compute_ce_loss(logits_flat, counts, gt_indices, gt_valid, B,
 
     Returns:
         loss: scalar tensor (mean over valid samples)
-        n_correct: int
-        n_valid: int
+        n_correct: scalar tensor
+        n_valid: scalar tensor
     """
-    device = gt_indices.device
-    loss = torch.tensor(0.0, device=device)
-    n_correct = 0
-    n_valid = 0
-    offset = 0
+    if B != len(counts) or gt_indices.shape[0] != B:
+        raise ValueError("counts and gt_indices must have one entry per batch item")
 
-    for b in range(B):
-        n = counts[b]
-        if n > 0:
-            if gt_valid is not None and not gt_valid[b]:
-                offset += n
-                continue
+    device = logits_flat.device
+    counts_tensor = torch.as_tensor(counts, device=device, dtype=torch.long)
+    max_count = max(counts, default=0)
+    if max_count == 0:
+        zero = logits_flat.sum() * 0.0
+        return zero, zero.detach(), torch.zeros((), device=device, dtype=torch.long)
 
-            target_val = gt_indices[b].item()
-            if debug_assert:
-                assert 0 <= target_val < n, \
-                    f"Target {target_val} out of bounds [0, {n}) for batch item {b}"
-            if target_val < 0 or target_val >= n:
-                offset += n
-                continue
+    # One padded CE kernel replaces B small kernels and dozens of .item()
+    # synchronizations. CopySlices/pad_sequence preserve gradients back to the
+    # original flat candidate logits.
+    segments = torch.split(logits_flat, counts)
+    padded_logits = pad_sequence(
+        segments, batch_first=True, padding_value=float('-inf')
+    )
+    candidate_mask = (
+        torch.arange(max_count, device=device).unsqueeze(0)
+        < counts_tensor.unsqueeze(1)
+    )
 
-            logits_b = logits_flat[offset:offset + n].unsqueeze(0)  # [1, n]
-            target_b = gt_indices[b:b + 1]                          # [1]
+    has_candidates = counts_tensor > 0
+    target_in_bounds = (gt_indices >= 0) & (gt_indices < counts_tensor)
+    eligible = has_candidates
+    if gt_valid is not None:
+        eligible = eligible & gt_valid.bool()
+    valid = eligible & target_in_bounds
 
-            if label_smoothing > 0 and n > 1:
-                # Manual label smoothing for variable-length CE
-                log_probs = F.log_softmax(logits_b, dim=1)
-                smooth = label_smoothing / n
-                targets_smooth = torch.full_like(log_probs, smooth)
-                targets_smooth[0, target_val] = 1.0 - label_smoothing + smooth
-                loss = loss + (-targets_smooth * log_probs).sum(dim=1).mean()
-            else:
-                loss = loss + F.cross_entropy(logits_b, target_b)
+    invalid_targets = eligible & ~target_in_bounds
+    if debug_assert and bool(invalid_targets.any()):
+        invalid_rows = invalid_targets.nonzero(as_tuple=False).flatten().cpu().tolist()
+        raise AssertionError(f"Invalid variable-candidate targets at batch rows {invalid_rows}")
 
-            pred_b = logits_b.argmax(dim=1)
-            n_correct += (pred_b == target_b).sum().item()
-            n_valid += 1
-        offset += n
+    # Make empty/invalid rows numerically safe even though their losses are
+    # masked. In particular, avoid a log_softmax row containing only -inf.
+    empty_rows = counts_tensor == 0
+    if 0 in counts:
+        padded_logits = padded_logits.clone()
+        padded_logits[empty_rows, 0] = 0.0
+    safe_targets = torch.where(valid, gt_indices, torch.zeros_like(gt_indices))
 
-    loss = loss / max(n_valid, 1)
+    if label_smoothing > 0:
+        log_probs = F.log_softmax(padded_logits, dim=1)
+        nll = -log_probs.gather(1, safe_targets.unsqueeze(1)).squeeze(1)
+        smooth = -log_probs.masked_fill(~candidate_mask, 0.0).sum(dim=1)
+        smooth = smooth / counts_tensor.clamp_min(1)
+        per_sample_loss = (1.0 - label_smoothing) * nll + label_smoothing * smooth
+    else:
+        per_sample_loss = F.cross_entropy(
+            padded_logits, safe_targets, reduction='none'
+        )
+
+    per_sample_loss = torch.where(valid, per_sample_loss, torch.zeros_like(per_sample_loss))
+    n_valid = valid.sum()
+    loss = per_sample_loss.sum() / n_valid.clamp_min(1)
+    n_correct = ((padded_logits.argmax(dim=1) == gt_indices) & valid).sum()
     return loss, n_correct, n_valid
+
+
+def _masked_note_mse(note_positions, gt_note_position, valid_mask):
+    """Mean note regression loss without a GPU-synchronizing ``any()``."""
+    if note_positions.shape[0] == 0:
+        return note_positions.sum() * 0.0
+    per_sample = (note_positions - gt_note_position).pow(2).mean(dim=1)
+    if valid_mask is None:
+        return per_sample.mean()
+    weights = valid_mask.to(dtype=per_sample.dtype)
+    return (per_sample * weights).sum() / weights.sum().clamp_min(1.0)
 
 
 def selection_loss(output, gt_system_idx, gt_bar_in_sys, gt_note_position,
@@ -98,7 +127,6 @@ def selection_loss(output, gt_system_idx, gt_bar_in_sys, gt_note_position,
         loss_dict with 'loss', 'sys_loss', 'bar_loss', 'note_loss',
         'sys_acc', 'bar_acc'
     """
-    device = gt_system_idx.device
     B = gt_system_idx.shape[0]
 
     # System CE -- always uses gt_valid (system targets are always correct)
@@ -116,18 +144,8 @@ def selection_loss(output, gt_system_idx, gt_bar_in_sys, gt_note_position,
 
     # Note MSE -- uses bar_note_valid
     note_positions = output['note_positions']
-    if note_positions.shape[0] > 0:
-        note_mask = bar_valid if bar_valid is not None else gt_valid
-        if note_mask is not None:
-            valid_mask = note_mask.bool()
-            if valid_mask.any():
-                note_loss = F.mse_loss(note_positions[valid_mask], gt_note_position[valid_mask])
-            else:
-                note_loss = torch.tensor(0.0, device=device)
-        else:
-            note_loss = F.mse_loss(note_positions, gt_note_position)
-    else:
-        note_loss = torch.tensor(0.0, device=device)
+    note_mask = bar_valid if bar_valid is not None else gt_valid
+    note_loss = _masked_note_mse(note_positions, gt_note_position, note_mask)
 
     # Static weighting
     loss = system_weight * sys_loss + bar_weight * bar_loss + note_weight * note_loss
@@ -137,8 +155,8 @@ def selection_loss(output, gt_system_idx, gt_bar_in_sys, gt_note_position,
         'sys_loss': sys_loss,
         'bar_loss': bar_loss,
         'note_loss': note_loss,
-        'sys_acc': sys_correct / max(n_valid, 1),
-        'bar_acc': bar_correct / max(n_valid_bar, 1),
+        'sys_acc': sys_correct.float() / n_valid.clamp_min(1),
+        'bar_acc': bar_correct.float() / n_valid_bar.clamp_min(1),
     }
 
 
@@ -170,7 +188,6 @@ class UncertaintyWeightedLoss(nn.Module):
 
         Ignores system_weight/bar_weight/note_weight kwargs -- weights are learned.
         """
-        device = gt_system_idx.device
         B = gt_system_idx.shape[0]
 
         # System CE -- always uses gt_valid
@@ -190,18 +207,8 @@ class UncertaintyWeightedLoss(nn.Module):
 
         # Note MSE -- uses bar_note_valid
         note_positions = output['note_positions']
-        if note_positions.shape[0] > 0:
-            note_mask = bar_valid if bar_valid is not None else gt_valid
-            if note_mask is not None:
-                valid_mask = note_mask.bool()
-                if valid_mask.any():
-                    note_loss = F.mse_loss(note_positions[valid_mask], gt_note_position[valid_mask])
-                else:
-                    note_loss = torch.tensor(0.0, device=device)
-            else:
-                note_loss = F.mse_loss(note_positions, gt_note_position)
-        else:
-            note_loss = torch.tensor(0.0, device=device)
+        note_mask = bar_valid if bar_valid is not None else gt_valid
+        note_loss = _masked_note_mse(note_positions, gt_note_position, note_mask)
 
         # Uncertainty weighting: L_i / (2 * exp(s_i)) + s_i / 2
         precision_sys = torch.exp(-self.log_var_sys)
@@ -212,19 +219,14 @@ class UncertaintyWeightedLoss(nn.Module):
               + 0.5 * precision_bar * bar_loss + 0.5 * self.log_var_bar
               + 0.5 * precision_note * note_loss + 0.5 * self.log_var_note)
 
-        # Effective weights for logging (higher precision = higher weight)
-        w_sys = precision_sys.item()
-        w_bar = precision_bar.item()
-        w_note = precision_note.item()
-
         return {
             'loss': loss,
             'sys_loss': sys_loss,
             'bar_loss': bar_loss,
             'note_loss': note_loss,
-            'sys_acc': sys_correct / max(n_valid, 1),
-            'bar_acc': bar_correct / max(n_valid_bar, 1),
-            'w_sys': w_sys,
-            'w_bar': w_bar,
-            'w_note': w_note,
+            'sys_acc': sys_correct.float() / n_valid.clamp_min(1),
+            'bar_acc': bar_correct.float() / n_valid_bar.clamp_min(1),
+            'w_sys': precision_sys.detach(),
+            'w_bar': precision_bar.detach(),
+            'w_note': precision_note.detach(),
         }

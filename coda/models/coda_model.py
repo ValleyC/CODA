@@ -18,13 +18,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 from coda.models.backbone import SharedBackbone, NoteHead
 from coda.models.modules import LogSpectrogram
 from coda.models.audio_encoder import MambaConditioning
 from coda.models.heads import SelectionHead, SelectionHeadV2
+from coda.models.temporal import BarTransitionPrior, SystemTransitionPrior
 from coda.models.builder import initialize_weights
 from coda.utils.data_utils import FPS, SAMPLE_RATE, FRAME_SIZE
+from coda.utils.optim import clip_gradient_at_boundary
 
 
 class SelectionCascadeModel(nn.Module):
@@ -45,6 +48,7 @@ class SelectionCascadeModel(nn.Module):
         groupnorm = cfg.get('groupnorm', True)
         activation = eval(cfg.get('activation', 'nn.ELU'))
         dropout = cascade_cfg.get('selection_dropout', 0.1)
+        self.conditioning_grad_clip = cascade_cfg.get('conditioning_grad_clip', 1.0)
 
         # --- Shared components ---
         self.spec_module = LogSpectrogram(sr=SAMPLE_RATE, fps=FPS, frame_size=FRAME_SIZE)
@@ -122,36 +126,27 @@ class SelectionCascadeModel(nn.Module):
         self.break_beam_k = break_cfg.get('beam_k_systems', -1)
         self.break_beam_m = break_cfg.get('beam_m_bars', 3)
 
-        # Learnable temporal priors (bounded nn.Parameters)
-        # "same"/"stay" is always 0.0 (anchored); others are <= 0 penalties.
-        # Raw params are unconstrained; clamped to [-8.0, 0.0] at access time.
+        # Normalized learnable transition distributions. Category logits are
+        # converted into proper probabilities over the candidates available on
+        # the current page/system, independent of category population size.
         sys_init = cascade_cfg.get('system_transition', {})
-        self._sys_tp_raw = nn.Parameter(torch.tensor([
-            sys_init.get('adjacent', -1.0),
-            sys_init.get('far', -3.0),
-        ]))
+        adjacent_init = sys_init.get('adjacent', -1.0)
+        self.system_transition_prior = SystemTransitionPrior(
+            same=sys_init.get('same', 0.0),
+            forward_1=sys_init.get('forward_1', adjacent_init),
+            backward_1=sys_init.get('backward_1', adjacent_init),
+            far=sys_init.get('far', -5.0),
+        )
 
         bar_init = cascade_cfg.get('bar_transition', {})
-        self._bar_tp_raw = nn.Parameter(torch.tensor([
-            bar_init.get('forward_1', -0.3),
-            bar_init.get('forward_2', -1.5),
-            bar_init.get('backward_1', -2.0),
-            bar_init.get('far', -3.0),
-        ]))
-
-        # Keep dict form for backward compat (used by test scripts for overrides)
-        self.system_transition = {
-            'same': 0.0,
-            'adjacent': sys_init.get('adjacent', -1.0),
-            'far': sys_init.get('far', -3.0),
-        }
-        self.bar_transition = {
-            'stay': 0.0,
-            'forward_1': bar_init.get('forward_1', -0.3),
-            'forward_2': bar_init.get('forward_2', -1.5),
-            'backward_1': bar_init.get('backward_1', -2.0),
-            'far': bar_init.get('far', -3.0),
-        }
+        self.bar_transition_prior = BarTransitionPrior(
+            stay=bar_init.get('stay', 0.0),
+            forward_1=bar_init.get('forward_1', -0.3),
+            forward_2=bar_init.get('forward_2', -1.5),
+            backward_1=bar_init.get('backward_1', -2.0),
+            far=bar_init.get('far', -5.0),
+        )
+        self.transition_prior_strength = cascade_cfg.get('transition_prior_strength', 1.0)
 
         # --- Tracking state ---
         self.prev_system_idx = None
@@ -187,15 +182,25 @@ class SelectionCascadeModel(nn.Module):
             return head(features, rois, z, spatial_scale)
 
     def compute_spec(self, x, tempo_aug=False):
-        return self.spec_module(x, tempo_aug)
+        # Spectral feature extraction is a numerical boundary rather than a
+        # learned layer. Keep STFT, phase vocoder, magnitude, and filterbank
+        # accumulation in FP32 even when the surrounding network uses AMP;
+        # high-gain reverb tails can overflow FP16 before log compression.
+        with torch.cuda.amp.autocast(enabled=False):
+            fp32_inputs = [
+                value.to(torch.complex64) if value.is_complex() else value.float()
+                for value in x
+            ]
+            return self.spec_module(fp32_inputs, tempo_aug)
 
     def encode_sequence(self, perf, hidden=None):
         return self.conditioning_network.encode_sequence(perf, hidden)
 
-    def reset_tracking_state(self):
+    def reset_tracking_state(self, reset_break_mode=True):
         self.prev_system_idx = None
         self.prev_bar_idx = None
-        self.reset_break_mode()
+        if reset_break_mode:
+            self.reset_break_mode()
 
     def reset_break_mode(self):
         self._break_mode_active = False
@@ -207,6 +212,24 @@ class SelectionCascadeModel(nn.Module):
     @property
     def is_break_mode(self):
         return self._break_mode_active
+
+    @property
+    def transition_prior_scale(self):
+        """Reliability gate for temporal evidence.
+
+        Priors are suppressed during silence and then restored smoothly over
+        the grace window rather than switching abruptly back on.
+        """
+        if not self._break_mode_active:
+            return 1.0
+        if self._in_silence:
+            return self.break_prior_scale
+        if self.break_grace_frames <= 0:
+            return 1.0
+        progress = 1.0 - min(
+            1.0, self._grace_frames_remaining / float(self.break_grace_frames)
+        )
+        return self.break_prior_scale + (1.0 - self.break_prior_scale) * progress
 
     def update_break_mode(self, sig_excerpt):
         """Update break mode using waveform RMS energy with hysteresis.
@@ -225,23 +248,19 @@ class SelectionCascadeModel(nn.Module):
         # RMS energy from waveform (not spectrogram)
         raw_energy = float(np.sqrt(np.mean(sig_excerpt ** 2)) + 1e-10)
 
-        # Freeze energy history while in silence -- prevents self-normalization
-        # where sustained silence shifts the baseline and triggers false release.
-        if not self._in_silence:
-            self._energy_history.append(raw_energy)
-            if len(self._energy_history) > self.break_energy_window:
-                self._energy_history.pop(0)
-
-        # Disable detection until enough history -- no fallback to raw
+        # Warm up a baseline before attempting detection.
         if len(self._energy_history) < self.break_min_history:
+            if not self._in_silence:
+                self._energy_history.append(raw_energy)
             diag['norm_energy'] = -1.0  # sentinel: not ready
             return diag
 
-        # Normalize against pre-silence baseline: z-score -> sigmoid -> [0, 1]
+        # Normalize against the *previous* non-silent baseline. Candidate
+        # silent frames must not contaminate their own reference statistics.
         mu = sum(self._energy_history) / len(self._energy_history)
         var = sum((x - mu) ** 2 for x in self._energy_history) / len(self._energy_history)
         sigma = math.sqrt(var) + 1e-8
-        z = (raw_energy - mu) / sigma
+        z = max(-60.0, min(60.0, (raw_energy - mu) / sigma))
         norm_energy = 1.0 / (1.0 + math.exp(-z))
 
         # Hysteresis state machine
@@ -261,6 +280,9 @@ class SelectionCascadeModel(nn.Module):
                     self._break_mode_active = True
             else:
                 self._silent_frame_count = 0
+                self._energy_history.append(raw_energy)
+                if len(self._energy_history) > self.break_energy_window:
+                    self._energy_history.pop(0)
 
         # Grace countdown (after audio resumes)
         if self._break_mode_active and not self._in_silence:
@@ -328,10 +350,45 @@ class SelectionCascadeModel(nn.Module):
         assert (gt_system_idx is None) == (gt_bar_in_sys is None), \
             "gt_system_idx and gt_bar_in_sys must both be provided or both be None"
         training = gt_system_idx is not None
+        # Routing metadata drives Python-side variable-length candidate lists.
+        # Copy every available index vector to the host together so training
+        # pays one device synchronization, rather than one per vector.
+        host_index_tensors = {}
+        if training:
+            host_index_tensors['gt_system'] = gt_system_idx
+            host_index_tensors['gt_bar'] = gt_bar_in_sys
+        if prev_gt_system_idx is not None:
+            host_index_tensors['prev_system'] = prev_gt_system_idx
+        if prev_gt_bar_page_idx is not None:
+            host_index_tensors['prev_bar'] = prev_gt_bar_page_idx
+        host_index_values = {}
+        if host_index_tensors:
+            host_index_names = tuple(host_index_tensors)
+            host_index_rows = torch.stack([
+                host_index_tensors[name].reshape(B)
+                for name in host_index_names
+            ]).detach().cpu().tolist()
+            host_index_values = dict(zip(host_index_names, host_index_rows))
+        if training:
+            gt_system_values = host_index_values['gt_system']
+            gt_bar_values = host_index_values['gt_bar']
 
         # Audio encoding
         perf = self.compute_spec(perf, tempo_aug)
         z, audio_seq, audio_lengths = self.encode_sequence(perf)
+        if self.training and self.conditioning_grad_clip is not None:
+            # Downstream FiLM and cross-attention Jacobians can become enormous
+            # while their forward values and task losses remain finite. Global
+            # parameter clipping occurs after backward and is therefore too
+            # late to protect Mamba. Clip at both conditioning outputs before
+            # their gradients enter the recurrent audio encoder.
+            max_norm = float(self.conditioning_grad_clip)
+            z.register_hook(
+                lambda gradient: clip_gradient_at_boundary(gradient, max_norm)
+            )
+            audio_seq.register_hook(
+                lambda gradient: clip_gradient_at_boundary(gradient, max_norm)
+            )
 
         # Shared backbone -> P3 features
         p3, p4 = self.backbone(score, z, audio_seq, audio_lengths)
@@ -342,7 +399,7 @@ class SelectionCascadeModel(nn.Module):
         all_sys_rois = []
         sys_counts = []
         for b in range(B):
-            boxes_b = system_boxes[b].to(device)
+            boxes_b = system_boxes[b].to(device, non_blocking=True)
             rois_b = self._xywh_to_rois(boxes_b, b, device)
             all_sys_rois.append(rois_b)
             sys_counts.append(boxes_b.shape[0])
@@ -354,7 +411,7 @@ class SelectionCascadeModel(nn.Module):
         # Add temporal priors to system logits during training (Phase 2a)
         if prev_gt_system_idx is not None:
             sys_logits = self._add_system_temporal_priors_train(
-                sys_logits, sys_counts, prev_gt_system_idx, B)
+                sys_logits, sys_counts, host_index_values['prev_system'], B)
 
         sys_log_probs = self._grouped_log_softmax(sys_logits, sys_counts)
 
@@ -365,8 +422,21 @@ class SelectionCascadeModel(nn.Module):
         bar_counts = []
         # Track actual system used and remapped bar targets for scheduled sampling
         actual_sys_idx = []  # which system was used per batch item
-        bar_target_remapped = torch.zeros(B, dtype=torch.long, device=device) if training else None
-        ss_bar_valid = torch.ones(B, dtype=torch.bool, device=device) if training else None
+        bar_target_values = [] if training else None
+        ss_bar_valid_values = [] if training else None
+
+        predicted_system_values = None
+        if p_pred > 0 or not training:
+            predictions = []
+            pred_offset = 0
+            for n_sys in sys_counts:
+                logits_b = sys_log_probs[pred_offset:pred_offset + n_sys]
+                predictions.append(
+                    logits_b.argmax() if n_sys > 0
+                    else torch.zeros((), device=device, dtype=torch.long)
+                )
+                pred_offset += n_sys
+            predicted_system_values = torch.stack(predictions).detach().cpu().tolist()
 
         offset = 0
         for b in range(B):
@@ -377,20 +447,20 @@ class SelectionCascadeModel(nn.Module):
                 # Scheduled sampling: use predicted system with probability p_pred
                 use_pred = p_pred > 0 and _random.random() < p_pred
                 if use_pred:
-                    sys_lp_b = sys_log_probs[offset:offset + n_sys]
-                    sel_sys = sys_lp_b.argmax().item() if n_sys > 0 else 0
+                    sel_sys = predicted_system_values[b]
                 else:
-                    sel_sys = gt_system_idx[b].item()
+                    sel_sys = gt_system_values[b]
 
                 actual_sys_idx.append(sel_sys)
 
                 # Remap bar target when routing through non-GT system
-                gt_sys = gt_system_idx[b].item()
-                gt_bar_local = gt_bar_in_sys[b].item()
+                gt_sys = gt_system_values[b]
+                gt_bar_local = gt_bar_values[b]
 
                 if sel_sys == gt_sys:
                     # Same system -- bar target unchanged
-                    bar_target_remapped[b] = gt_bar_local
+                    bar_target_values.append(gt_bar_local)
+                    ss_bar_valid_values.append(True)
                 else:
                     # Different system -- find GT bar in predicted system's candidates
                     gt_bars_list = bps[gt_sys] if gt_sys < len(bps) else []
@@ -398,18 +468,18 @@ class SelectionCascadeModel(nn.Module):
                     pred_bars_list = bps[sel_sys] if sel_sys < len(bps) else []
 
                     if gt_bar_page >= 0 and gt_bar_page in pred_bars_list:
-                        bar_target_remapped[b] = pred_bars_list.index(gt_bar_page)
+                        bar_target_values.append(pred_bars_list.index(gt_bar_page))
+                        ss_bar_valid_values.append(True)
                     else:
                         # GT bar not in predicted system -- mask bar/note loss
-                        bar_target_remapped[b] = 0  # dummy, will be masked
-                        ss_bar_valid[b] = False
+                        bar_target_values.append(0)  # dummy, will be masked
+                        ss_bar_valid_values.append(False)
             else:
-                sys_lp_b = sys_log_probs[offset:offset + n_sys]
-                sel_sys = sys_lp_b.argmax().item() if n_sys > 0 else 0
+                sel_sys = predicted_system_values[b]
                 actual_sys_idx.append(sel_sys)
 
             bar_indices = bps[sel_sys] if sel_sys < len(bps) else []
-            all_bar_boxes_b = bar_boxes[b].to(device)
+            all_bar_boxes_b = bar_boxes[b].to(device, non_blocking=True)
 
             if len(bar_indices) > 0:
                 sel_bar_boxes = all_bar_boxes_b[bar_indices]
@@ -429,10 +499,9 @@ class SelectionCascadeModel(nn.Module):
         # Add temporal priors to bar logits during training (Phase 2a)
         # Use actual_sys_idx (not gt_system_idx) so priors match the routed system
         if prev_gt_bar_page_idx is not None and training:
-            actual_sys_tensor = torch.tensor(actual_sys_idx, dtype=torch.long, device=device)
             bar_logits = self._add_bar_temporal_priors_train(
-                bar_logits, bar_counts, prev_gt_bar_page_idx,
-                bars_per_system, actual_sys_tensor, B)
+                bar_logits, bar_counts, host_index_values['prev_bar'],
+                bars_per_system, actual_sys_idx, B)
 
         bar_log_probs = self._grouped_log_softmax(bar_logits, bar_counts)
 
@@ -444,7 +513,7 @@ class SelectionCascadeModel(nn.Module):
             n_bars = bar_counts[b]
 
             if training:
-                sel_bar = bar_target_remapped[b].item()
+                sel_bar = bar_target_values[b]
                 # Bounds check -- fallback to bar 0 if out of range
                 if n_bars > 0 and sel_bar >= n_bars:
                     sel_bar = 0
@@ -463,7 +532,7 @@ class SelectionCascadeModel(nn.Module):
             offset += n_bars
 
         note_rois = torch.cat(note_rois, dim=0)
-        note_positions, note_confidences = self.note_head(
+        note_positions = self.note_head(
             p3, note_rois, z, spatial_scale=spatial_scale
         )
 
@@ -475,82 +544,78 @@ class SelectionCascadeModel(nn.Module):
             'bar_log_probs': bar_log_probs,
             'bar_counts': bar_counts,
             'note_positions': note_positions,
-            'note_confidences': note_confidences,
             'note_rois': note_rois,
             'z': z,
+            # Retained by the training loop only while diagnosing a protected
+            # gradient skip. Keeping this boundary tensor in the result lets
+            # diagnostics distinguish a downstream NaN from Mamba backward.
+            'audio_seq': audio_seq,
         }
         # Scheduled sampling outputs
-        if bar_target_remapped is not None:
+        if training:
+            bar_target_remapped = torch.tensor(
+                bar_target_values, dtype=torch.long, device=device
+            )
+            ss_bar_valid = torch.tensor(
+                ss_bar_valid_values, dtype=torch.bool, device=device
+            )
             result['bar_target_remapped'] = bar_target_remapped
             result['ss_bar_valid'] = ss_bar_valid
         return result
 
-    def _add_system_temporal_priors_train(self, sys_logits, sys_counts, prev_sys, B):
-        """Add learnable temporal prior biases to system logits (training only).
-
-        Builds a prior correction tensor and adds it to raw logits, so the CE
-        loss trains the model to produce logits that work with temporal priors.
-        Gradients flow back to the learnable prior parameters.
-        """
-        priors = self.sys_temporal_priors  # [adjacent, far], differentiable
-        tp = torch.zeros_like(sys_logits)
-        offset = 0
+    def _add_system_temporal_priors_train(self, sys_logits, sys_counts,
+                                           previous_values, B):
+        """Add normalized, differentiable system transition log-priors."""
+        prior_biases = []
         for b in range(B):
             n = sys_counts[b]
-            prev = prev_sys[b].item()
-            if prev >= 0:  # -1 = no previous (first frame / page change)
-                for i in range(n):
-                    dist = abs(i - prev)
-                    if dist == 1:
-                        tp[offset + i] = priors[0]   # adjacent
-                    elif dist > 1:
-                        tp[offset + i] = priors[1]   # far
-            offset += n
-        return sys_logits + tp
+            candidates = torch.arange(n, device=sys_logits.device)
+            prior_biases.append(
+                self.system_transition_prior.log_prior(candidates, previous_values[b])
+            )
+        if not prior_biases:
+            return sys_logits
+        priors = torch.cat(prior_biases).to(dtype=sys_logits.dtype)
+        return sys_logits + self.transition_prior_strength * priors
 
     def _add_bar_temporal_priors_train(self, bar_logits, bar_counts,
-                                       prev_bar_page, bars_per_system,
+                                       previous_values, bars_per_system,
                                        gt_system_idx, B):
-        """Add learnable temporal prior biases to bar logits (training only).
-
-        Uses page-local bar indices to compute transition distances, matching
-        the inference-time temporal prior computation.
-        """
-        priors = self.bar_temporal_priors  # [fwd1, fwd2, bwd1, far], differentiable
-        tp = torch.zeros_like(bar_logits)
-        offset = 0
+        """Add normalized bar transition log-priors using page-local indices."""
+        prior_biases = []
         for b in range(B):
             n = bar_counts[b]
-            prev = prev_bar_page[b].item()
-            if prev >= 0 and n > 0:
-                sel_sys = gt_system_idx[b].item()
-                bps = bars_per_system[b]
-                bar_indices = bps[sel_sys] if sel_sys < len(bps) else []
-                for i in range(min(n, len(bar_indices))):
-                    diff = bar_indices[i] - prev
-                    if diff == 1:
-                        tp[offset + i] = priors[0]   # forward_1
-                    elif diff == 2:
-                        tp[offset + i] = priors[1]   # forward_2
-                    elif diff == -1:
-                        tp[offset + i] = priors[2]   # backward_1
-                    elif diff != 0:
-                        tp[offset + i] = priors[3]   # far
-            offset += n
-        return bar_logits + tp
+            sel_sys = gt_system_idx[b]
+            bps = bars_per_system[b]
+            bar_indices = bps[sel_sys] if sel_sys < len(bps) else []
+            if len(bar_indices) == n:
+                candidates = torch.as_tensor(
+                    bar_indices, device=bar_logits.device, dtype=torch.long
+                )
+            else:
+                candidates = torch.arange(n, device=bar_logits.device)
+            prior_biases.append(
+                self.bar_transition_prior.log_prior(candidates, previous_values[b])
+            )
+        if not prior_biases:
+            return bar_logits
+        priors = torch.cat(prior_biases).to(dtype=bar_logits.dtype)
+        return bar_logits + self.transition_prior_strength * priors
 
     def _grouped_log_softmax(self, logits, counts):
         """Apply log_softmax within each group defined by counts."""
         if logits.shape[0] == 0:
             return logits
-
-        result = torch.zeros_like(logits)
-        offset = 0
-        for count in counts:
-            if count > 0:
-                result[offset:offset + count] = F.log_softmax(logits[offset:offset + count], dim=0)
-            offset += count
-        return result
+        segments = torch.split(logits, counts)
+        padded = pad_sequence(segments, batch_first=True, padding_value=float('-inf'))
+        if 0 in counts:
+            empty_rows = torch.as_tensor(counts, device=logits.device) == 0
+            padded = padded.clone()
+            padded[empty_rows, 0] = 0.0
+        normalized = F.log_softmax(padded, dim=1)
+        return torch.cat([
+            normalized[row, :count] for row, count in enumerate(counts)
+        ])
 
     # --- Inference methods ---
 
@@ -578,7 +643,15 @@ class SelectionCascadeModel(nn.Module):
         sys_rois = self._xywh_to_rois(system_boxes_xywh, 0, device)
         sys_logits = self._call_head(self.system_head, p3, sys_rois, z, spatial_scale,
                                      audio_seq=audio_seq, audio_lengths=audio_lengths)
-        sys_log_probs = F.log_softmax(sys_logits, dim=0)
+        if sys_logits.numel() == 0:
+            return None
+
+        prior_scale = self.transition_prior_strength * self.transition_prior_scale
+        sys_candidates = torch.arange(sys_logits.shape[0], device=device)
+        sys_prior = self.system_transition_prior.log_prior(
+            sys_candidates, self.prev_system_idx
+        ).to(dtype=sys_logits.dtype)
+        sys_log_probs = F.log_softmax(sys_logits + prior_scale * sys_prior, dim=0)
 
         # Top-k systems for beam search (widen during break mode)
         if self._break_mode_active:
@@ -588,14 +661,14 @@ class SelectionCascadeModel(nn.Module):
             k = min(self.top_k_systems, sys_log_probs.shape[0])
         top_sys_lp, top_sys_idx = torch.topk(sys_log_probs, k)
 
-        # Stage 2: For each top system, score its bars
-        paths = []
+        # Stage 2: collect bars from all beam systems and score them in one
+        # batched head call. This removes up to k-1 repeated cross-attention
+        # launches per frame without changing the conditional normalization.
+        beam_systems = []
+        all_bar_rois = []
         for si in range(k):
             sys_i = top_sys_idx[si].item()
             sys_lp = top_sys_lp[si].item()
-            sys_tp = self._system_temporal_prior(sys_i)
-            if self._break_mode_active:
-                sys_tp *= self.break_prior_scale
 
             bar_indices = bars_per_system[sys_i] if sys_i < len(bars_per_system) else []
             if not bar_indices:
@@ -603,9 +676,34 @@ class SelectionCascadeModel(nn.Module):
 
             bar_boxes_in_sys = bar_boxes_xywh[bar_indices]
             bar_rois = self._xywh_to_rois(bar_boxes_in_sys, 0, device)
-            bar_logits = self._call_head(self.bar_head, p3, bar_rois, z, spatial_scale,
-                                         audio_seq=audio_seq, audio_lengths=audio_lengths)
-            bar_lp = F.log_softmax(bar_logits, dim=0)
+            beam_systems.append({
+                'system_idx': sys_i,
+                'system_log_prob': sys_lp,
+                'bar_indices': bar_indices,
+                'bar_rois': bar_rois,
+            })
+            all_bar_rois.append(bar_rois)
+
+        if not beam_systems:
+            return None
+
+        merged_bar_rois = torch.cat(all_bar_rois, dim=0)
+        merged_bar_logits = self._call_head(
+            self.bar_head, p3, merged_bar_rois, z, spatial_scale,
+            audio_seq=audio_seq, audio_lengths=audio_lengths,
+        )
+
+        paths = []
+        offset = 0
+        for candidate in beam_systems:
+            bar_indices = candidate['bar_indices']
+            n_bars = len(bar_indices)
+            bar_logits = merged_bar_logits[offset:offset + n_bars]
+            bar_positions = torch.as_tensor(bar_indices, device=device, dtype=torch.long)
+            bar_prior = self.bar_transition_prior.log_prior(
+                bar_positions, self.prev_bar_idx
+            ).to(dtype=bar_logits.dtype)
+            bar_lp = F.log_softmax(bar_logits + prior_scale * bar_prior, dim=0)
 
             if self._break_mode_active:
                 m = min(self.break_beam_m, bar_lp.shape[0])
@@ -617,21 +715,18 @@ class SelectionCascadeModel(nn.Module):
                 bar_local = top_bar_local_idx[bi].item()
                 bar_page_idx = bar_indices[bar_local]
                 bar_score = top_bar_lp[bi].item()
-                bar_tp = self._bar_temporal_prior(bar_page_idx)
-                if self._break_mode_active:
-                    bar_tp *= self.break_prior_scale
-
-                joint_score = sys_lp + sys_tp + bar_score + bar_tp
+                joint_score = candidate['system_log_prob'] + bar_score
 
                 paths.append({
-                    'system_idx': sys_i,
+                    'system_idx': candidate['system_idx'],
                     'bar_page_idx': bar_page_idx,
                     'bar_local_idx': bar_local,
-                    'bar_roi': bar_rois[bar_local].unsqueeze(0),
+                    'bar_roi': candidate['bar_rois'][bar_local].unsqueeze(0),
                     'score': joint_score,
-                    'sys_lp': sys_lp,
+                    'sys_lp': candidate['system_log_prob'],
                     'bar_lp': bar_score,
                 })
+            offset += n_bars
 
         if not paths:
             return None
@@ -639,7 +734,7 @@ class SelectionCascadeModel(nn.Module):
         best = max(paths, key=lambda p: p['score'])
 
         # Evaluate note head only on the winning path
-        note_pos, _ = self.note_head(p3, best['bar_roi'], z, spatial_scale=spatial_scale)
+        note_pos = self.note_head(p3, best['bar_roi'], z, spatial_scale=spatial_scale)
         note_cx, note_cy = note_pos[0].tolist()
         bar_box = bar_boxes_xywh[best['bar_page_idx']]
         bar_x1 = (bar_box[0] - bar_box[2] / 2).item()
@@ -666,40 +761,14 @@ class SelectionCascadeModel(nn.Module):
         }
 
     @property
-    def sys_temporal_priors(self):
-        """Bounded system temporal priors: [adjacent, far] in [-8, 0]."""
-        return self._sys_tp_raw.clamp(min=-8.0, max=0.0)
+    def system_transition(self):
+        """Return learned system-transition logits by category."""
+        return self.system_transition_prior.logits_dict()
 
     @property
-    def bar_temporal_priors(self):
-        """Bounded bar temporal priors: [fwd1, fwd2, bwd1, far] in [-8, 0]."""
-        return self._bar_tp_raw.clamp(min=-8.0, max=0.0)
-
-    def _system_temporal_prior(self, sys_idx):
-        if self.prev_system_idx is None:
-            return 0.0
-        dist = abs(sys_idx - self.prev_system_idx)
-        if dist == 0:
-            return 0.0  # "same" always anchored at 0
-        elif dist == 1:
-            return self.sys_temporal_priors[0].item()  # adjacent
-        else:
-            return self.sys_temporal_priors[1].item()  # far
-
-    def _bar_temporal_prior(self, bar_idx):
-        if self.prev_bar_idx is None:
-            return 0.0
-        diff = bar_idx - self.prev_bar_idx
-        if diff == 0:
-            return 0.0  # "stay" always anchored at 0
-        elif diff == 1:
-            return self.bar_temporal_priors[0].item()  # forward_1
-        elif diff == 2:
-            return self.bar_temporal_priors[1].item()  # forward_2
-        elif diff == -1:
-            return self.bar_temporal_priors[2].item()  # backward_1
-        else:
-            return self.bar_temporal_priors[3].item()  # far
+    def bar_transition(self):
+        """Return learned bar-transition logits by category."""
+        return self.bar_transition_prior.logits_dict()
 
 
 def build_model(config, loss_calibration='static', label_smoothing=0.0):
@@ -721,12 +790,10 @@ def load_model(param_path):
     with open(os.path.join(param_dir, 'net_config.json'), 'r') as f:
         config = json.load(f)
 
+    from coda.utils.checkpoint import extract_model_state
+
     model, criterion = build_model(config)
-    try:
-        model.load_state_dict(torch.load(param_path, map_location='cpu'))
-    except:
-        model = nn.parallel.DataParallel(model)
-        model.load_state_dict(torch.load(param_path, map_location='cpu'))
-        model = model.module
+    checkpoint = torch.load(param_path, map_location='cpu')
+    model.load_state_dict(extract_model_state(checkpoint))
 
     return model, criterion

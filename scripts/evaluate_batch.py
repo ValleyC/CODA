@@ -11,7 +11,7 @@ Supports two evaluation modes:
 Usage:
     # Standard tracking on MSMD test set (Table 1)
     python scripts/evaluate_batch.py \
-        --param_path pretrained/best_model.pt \
+        --param_path path/to/best_model.pt \
         --test_dir data/msmd/msmd_test \
         --label "CODA (ours)" \
         --metrics_dir results/metrics/standard \
@@ -19,7 +19,7 @@ Usage:
 
     # Jump recovery on repeat subset (Table 2)
     python scripts/evaluate_batch.py \
-        --param_path pretrained/best_model.pt \
+        --param_path path/to/best_model.pt \
         --test_dir data/msmd/msmd_test_jump/repeat \
         --break_mode --label "CODA (full) - repeat" \
         --metrics_dir results/metrics/repeat \
@@ -27,7 +27,7 @@ Usage:
 
     # With videos (inline, one piece at a time)
     python scripts/evaluate_batch.py \
-        --param_path pretrained/best_model.pt \
+        --param_path path/to/best_model.pt \
         --test_dir data/msmd/msmd_test_jump/repeat \
         --break_mode --label "CODA (full) repeat" \
         --save_summary results/repeat_summary.json \
@@ -40,6 +40,7 @@ import json
 import glob
 import argparse
 import subprocess
+import uuid
 import numpy as np
 from collections import defaultdict
 
@@ -50,14 +51,48 @@ def find_pieces(test_dir):
     return [os.path.splitext(os.path.basename(f))[0] for f in npz_files]
 
 
+def build_serializable_summary(summary, label, failed, requested_pieces):
+    """Attach completeness metadata and normalize top-level NumPy scalars."""
+    clean = {}
+    for key, value in summary.items():
+        if isinstance(value, (np.floating, np.integer)):
+            clean[key] = value.item()
+        else:
+            clean[key] = value
+    clean['label'] = label
+    clean['requested_pieces'] = int(requested_pieces)
+    clean['successful_pieces'] = int(summary.get('n_pieces', 0))
+    clean['failed_pieces'] = list(failed)
+    clean['complete'] = not failed and clean['successful_pieces'] == requested_pieces
+    return clean
+
+
+def atomic_json_dump(payload, path):
+    """Replace a JSON result only after the complete payload is durable."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    temporary_path = f"{path}.tmp-{os.getpid()}"
+    try:
+        with open(temporary_path, 'w') as handle:
+            json.dump(payload, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
 def run_evaluate(piece_name, args, metrics_path):
     """Run evaluate.py for a single piece, return metrics dict or None."""
+    temporary_metrics_path = (
+        f"{metrics_path}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
+    )
     cmd = [
         sys.executable, 'scripts/evaluate.py',
         '--param_path', args.param_path,
         '--test_dir', args.test_dir,
         '--test_piece', piece_name,
-        '--save_metrics', metrics_path,
+        '--save_metrics', temporary_metrics_path,
     ]
     if args.with_video:
         cmd.extend(['--output_dir', args.video_dir])
@@ -83,15 +118,35 @@ def run_evaluate(piece_name, args, metrics_path):
             cmd.extend(['--break_beam_m', str(args.break_beam_m)])
 
     # Let stderr (tqdm progress bar) pass through to terminal
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=None, text=True)
-    if result.returncode != 0:
-        print(f"  FAILED: {piece_name}")
-        return None
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=None, text=True
+        )
+        if result.returncode != 0:
+            print(f"  FAILED: {piece_name}")
+            if result.stdout:
+                print(result.stdout.rstrip())
+            return None
 
-    if os.path.exists(metrics_path):
-        with open(metrics_path) as f:
-            return json.load(f)
-    return None
+        # Never accept a pre-existing final JSON as evidence for this
+        # invocation. The child must produce fresh, parseable metrics at its
+        # unique staging path; only then publish them atomically.
+        if not os.path.exists(temporary_metrics_path):
+            print(f"  FAILED: {piece_name} produced no metrics file")
+            return None
+        with open(temporary_metrics_path, encoding='utf-8') as handle:
+            metrics = json.load(handle)
+        if not isinstance(metrics, dict):
+            print(f"  FAILED: {piece_name} metrics are not a JSON object")
+            return None
+        os.replace(temporary_metrics_path, metrics_path)
+        return metrics
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  FAILED: {piece_name} metrics error: {exc}")
+        return None
+    finally:
+        if os.path.exists(temporary_metrics_path):
+            os.remove(temporary_metrics_path)
 
 
 
@@ -414,16 +469,16 @@ if __name__ == '__main__':
             print(f"    - {p}")
 
     if args.save_summary:
-        os.makedirs(os.path.dirname(args.save_summary) or '.', exist_ok=True)
-        # Convert numpy types for JSON serialization
-        clean = {}
-        for k, v in summary.items():
-            if isinstance(v, (np.floating, np.integer)):
-                clean[k] = float(v)
-            else:
-                clean[k] = v
-        clean['label'] = args.label
-        clean['failed_pieces'] = failed
-        with open(args.save_summary, 'w') as f:
-            json.dump(clean, f, indent=2)
+        clean = build_serializable_summary(
+            summary, args.label, failed, len(pieces)
+        )
+        atomic_json_dump(clean, args.save_summary)
         print(f"\n  Summary saved to {args.save_summary}")
+
+    if failed:
+        print(
+            f"\nEvaluation incomplete: {len(failed)}/{len(pieces)} piece(s) "
+            "failed; refusing successful exit.",
+            file=sys.stderr,
+        )
+        sys.exit(2)

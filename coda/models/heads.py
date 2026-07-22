@@ -13,6 +13,56 @@ import torch.nn.functional as F
 from torchvision.ops import roi_align
 
 from coda.models.modules import Conv
+from coda.utils.sequence import take_last_valid_window
+
+
+def _fp16_autocast_active(tensor):
+    """Return whether CUDA autocast is currently using narrow-range FP16."""
+    autocast_dtype = (
+        torch.get_autocast_dtype('cuda')
+        if hasattr(torch, 'get_autocast_dtype')
+        else torch.get_autocast_gpu_dtype()
+    )
+    return (
+        tensor.is_cuda
+        and torch.is_autocast_enabled()
+        and autocast_dtype == torch.float16
+    )
+
+
+def _cuda_autocast_active(tensor):
+    """Return whether a CUDA tensor is executing inside an AMP region."""
+    return tensor.is_cuda and torch.is_autocast_enabled()
+
+
+def _roi_film_first_conv(features, rois, z, roi_size, spatial_scale,
+                          gamma_layer, beta_layer, conv_layer):
+    """Apply the numerically sensitive ROI-FiLM-first-conv prefix.
+
+    Learned FiLM gains can make otherwise finite ROI features large enough
+    that the 3x3 convolution's FP16 accumulation overflows before GroupNorm
+    can rescale it. BF16 has sufficient exponent range; for explicit FP16 AMP,
+    keep only this prefix in FP32 and leave the rest of the head AMP eligible.
+    """
+    batch_indices = rois[:, 0].long()
+    if _fp16_autocast_active(features):
+        with torch.autocast(device_type='cuda', enabled=False):
+            roi_features = roi_align(
+                features.float(), rois.float(), output_size=roi_size,
+                spatial_scale=spatial_scale,
+            )
+            z_per_roi = z[batch_indices].float()
+            gamma = gamma_layer(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+            beta = beta_layer(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+            return conv_layer(gamma * roi_features + beta), batch_indices
+
+    roi_features = roi_align(
+        features, rois, output_size=roi_size, spatial_scale=spatial_scale
+    )
+    z_per_roi = z[batch_indices]
+    gamma = gamma_layer(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+    beta = beta_layer(z_per_roi).unsqueeze(-1).unsqueeze(-1)
+    return conv_layer(gamma * roi_features + beta), batch_indices
 
 
 class SelectionHead(nn.Module):
@@ -52,19 +102,14 @@ class SelectionHead(nn.Module):
         if rois.shape[0] == 0:
             return torch.zeros(0, device=p3.device)
 
-        # ROI align at known locations
-        roi_features = roi_align(p3, rois, output_size=self.roi_size,
-                                  spatial_scale=spatial_scale)  # [N, C, H_roi, W_roi]
+        # ROI alignment, FiLM, and the first convolution form one numerical
+        # boundary; the helper protects its FP16 accumulation when necessary.
+        x, _ = _roi_film_first_conv(
+            p3, rois, z, self.roi_size, spatial_scale,
+            self.gamma, self.beta, self.conv1,
+        )
 
-        # FiLM conditioning per ROI
-        batch_indices = rois[:, 0].long()
-        z_per_roi = z[batch_indices]
-        gamma = self.gamma(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        beta = self.beta(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        roi_features = gamma * roi_features + beta
-
-        # Conv + pool -> logit
-        x = self.conv1(roi_features)
+        # Remaining conv + pool -> logit
         x = self.conv2(x)
         x = self.pool(x).flatten(1)  # [N, C]
         x = self.dropout(x)
@@ -77,8 +122,9 @@ class SelectionHeadV2(nn.Module):
     """
     Enhanced selection head with cross-attention and optional candidate context.
 
-    Pipeline: ROI Align -> FiLM(z) -> Conv -> Conv -> CrossAttn(roi, audio_seq) -> Pool -> FC
-    Falls back to FiLM-only when audio_seq is None (streaming warmup / backward compat).
+    Pipeline: ROI Align -> FiLM(z) -> Conv -> Conv -> CrossAttn(roi, audio_seq) -> Pool -> FC.
+    Before an audio history is available, the head uses its FiLM-conditioned
+    visual representation directly.
     """
 
     def __init__(self, in_channels, roi_size, zdim=128, dropout=0.1,
@@ -126,7 +172,8 @@ class SelectionHeadV2(nn.Module):
             rois: [N, 5] ROI boxes [batch_idx, x1, y1, x2, y2]
             z: [B, zdim] pooled audio conditioning
             spatial_scale: 1/stride
-            audio_seq: [B, T, audio_dim] per-frame Mamba hidden states (None = FiLM fallback)
+            audio_seq: [B, T, audio_dim] per-frame Mamba hidden states, or None
+                before the streaming history is initialized
             audio_lengths: [B] actual lengths for masking
 
         Returns:
@@ -137,42 +184,25 @@ class SelectionHeadV2(nn.Module):
 
         N = rois.shape[0]
         C = features.shape[1]
-        batch_indices = rois[:, 0].long()
-
-        # Step 1: ROI Align
-        roi_features = roi_align(features, rois, output_size=self.roi_size,
-                                 spatial_scale=spatial_scale)
-
-        # Step 2: FiLM conditioning
-        z_per_roi = z[batch_indices]
-        gamma = self.gamma(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        beta = self.beta(z_per_roi).unsqueeze(-1).unsqueeze(-1)
-        roi_features = gamma * roi_features + beta
-
-        # Step 3: Conv layers
-        x = self.conv1(roi_features)
+        # Steps 1-3: protect the potentially overflowing FiLM/conv prefix for
+        # FP16 while retaining ordinary AMP execution for BF16 and FP32.
+        x, batch_indices = _roi_film_first_conv(
+            features, rois, z, self.roi_size, spatial_scale,
+            self.gamma, self.beta, self.conv1,
+        )
         x = self.conv2(x)
 
-        # Step 4: Cross-attention (skip if audio_seq not available)
+        # Step 4: Cross-attention once streaming audio history is available.
         if audio_seq is not None:
             H_roi, W_roi = x.shape[2], x.shape[3]
 
-            # Window audio to last audio_window frames
-            audio = audio_seq
-            a_lengths = audio_lengths
-            if self.audio_window is not None and audio.shape[1] > self.audio_window:
-                audio = audio[:, -self.audio_window:, :]
-                if a_lengths is not None:
-                    a_lengths = torch.clamp(a_lengths, max=self.audio_window)
+            # Window relative to each sample's valid length. A batch-wide
+            # right slice would select padding/post-padding states for shorter
+            # sequences in a variable-length batch.
+            audio, a_lengths = take_last_valid_window(
+                audio_seq, audio_lengths, self.audio_window
+            )
             T = audio.shape[1]
-
-            # Project audio and index per-ROI
-            audio_kv = self.audio_proj(audio)           # [B, T, C]
-            audio_kv_per_roi = audio_kv[batch_indices]  # [N, T, C]
-
-            # Flatten spatial dims as queries
-            x_flat = x.permute(0, 2, 3, 1).reshape(N, H_roi * W_roi, C)
-            x_query = self.attn_ln(x_flat)
 
             # Key padding mask for variable-length audio
             key_padding_mask = None
@@ -183,20 +213,58 @@ class SelectionHeadV2(nn.Module):
                     >= a_lengths_per_roi.unsqueeze(1)
                 )
 
-            # Cross-attention
-            x_attn, _ = self.cross_attn(
-                query=x_query,
-                key=audio_kv_per_roi,
-                value=audio_kv_per_roi,
-                key_padding_mask=key_padding_mask,
-                need_weights=False,
-            )
-
-            # Output projection + layer scale + residual
-            x_attn = self.attn_out_proj(x_attn)
-            x_attn = x_attn * self.layer_scale
-            x_attn = x_attn.reshape(N, H_roi, W_roi, C).permute(0, 3, 1, 2)
-            x = x + x_attn
+            # Attention uses FP32 under AMP; the bounded temporal window keeps
+            # this block small while preserving stable Q/K/V gradients. Cast
+            # the residual back so the backbone and scorer remain AMP eligible.
+            if _cuda_autocast_active(features):
+                residual_dtype = x.dtype
+                with torch.autocast(device_type='cuda', enabled=False):
+                    audio_kv = self.audio_proj(audio.float())
+                    audio_kv_per_roi = audio_kv[batch_indices]
+                    x_flat = x.float().permute(0, 2, 3, 1).reshape(
+                        N, H_roi * W_roi, C
+                    )
+                    x_query = self.attn_ln(x_flat)
+                    # Use the deterministic math SDPA kernel for this bounded
+                    # attention block.
+                    with torch.backends.cuda.sdp_kernel(
+                        enable_flash=False,
+                        enable_math=True,
+                        enable_mem_efficient=False,
+                    ):
+                        x_attn, _ = self.cross_attn(
+                            query=x_query,
+                            key=audio_kv_per_roi,
+                            value=audio_kv_per_roi,
+                            key_padding_mask=key_padding_mask,
+                            need_weights=False,
+                        )
+                    x_attn = self.attn_out_proj(x_attn)
+                    x_attn = x_attn * self.layer_scale
+                    x_attn = x_attn.reshape(
+                        N, H_roi, W_roi, C
+                    ).permute(0, 3, 1, 2)
+                    x = (x.float() + x_attn).to(residual_dtype)
+            else:
+                audio_kv = self.audio_proj(audio)
+                audio_kv_per_roi = audio_kv[batch_indices]
+                x_flat = x.permute(0, 2, 3, 1).reshape(
+                    N, H_roi * W_roi, C
+                )
+                x_query = self.attn_ln(x_flat)
+                x_attn, _ = self.cross_attn(
+                    query=x_query,
+                    key=audio_kv_per_roi,
+                    value=audio_kv_per_roi,
+                    key_padding_mask=key_padding_mask,
+                    need_weights=False,
+                )
+                x_attn = self.attn_out_proj(x_attn)
+                x_attn = x_attn * self.layer_scale
+                x_attn = x_attn.reshape(
+                    N, H_roi, W_roi, C
+                ).permute(0, 3, 1, 2)
+                x = x + x_attn
 
         # Step 5: Pool
         x = self.pool(x).flatten(1)

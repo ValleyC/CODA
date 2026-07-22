@@ -6,6 +6,13 @@ __pycache__/
 dist/
 build/
 *.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # Environment
 .env
@@ -21,10 +28,15 @@ build/
 .DS_Store
 Thumbs.db
 
-# Data and checkpoints (downloaded separately)
+# Data and checkpoints (downloaded or generated separately)
 data/msmd/
+data/irs/
+data/*.zip
 pretrained/
 params/
+*.pt
+*.pth
+*.ckpt
 
 # Output artifacts
 results/
@@ -35,6 +47,12 @@ gt_vis/
 *.log
 wandb/
 runs/
+
+# Interrupted atomic writes and local scratch files
+*.tmp
+*.tmp-*
+*.partial
+*.bak
 
 # Jupyter
 .ipynb_checkpoints/

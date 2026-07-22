@@ -91,13 +91,10 @@ def streaming_eval_piece(network, test_dir, piece_name, scale_width, device,
         gt_bar_global = int(true_position[3])
         current_page = int(true_position[-1])
 
-        # Reset on page change
+        # Candidate indices are page-local, but audio history remains useful
+        # across a normal page turn.
         if actual_page != current_page:
-            hidden = None
-            if hasattr(cond_net, 'reset_inference_state'):
-                cond_net.reset_inference_state()
-            network.reset_tracking_state()
-            audio_buffer.clear()
+            network.reset_tracking_state(reset_break_mode=False)
 
         actual_page = current_page
 

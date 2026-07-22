@@ -213,7 +213,7 @@ if __name__ == '__main__':
                         help='Break mode: normalized energy below this enters silence')
     parser.add_argument('--break_release_threshold', type=float, default=0.25,
                         help='Break mode: normalized energy above this exits silence')
-    parser.add_argument('--break_silence_onset', type=int, default=3,
+    parser.add_argument('--break_silence_onset', type=int, default=2,
                         help='Break mode: consecutive silent frames before activating')
     parser.add_argument('--break_grace_frames', type=int, default=8,
                         help='Break mode: grace frames after audio resumes for relocalization')
@@ -272,8 +272,10 @@ if __name__ == '__main__':
     }
     for key, val in overrides.items():
         if val is not None:
-            network.bar_transition[key] = val
-    print(f"Bar temporal priors: {network.bar_transition}")
+            network.bar_transition_prior.set_logit(key, val)
+    print(f"Bar transition logits: {network.bar_transition}")
+    print(f"Bar transition probabilities: "
+          f"{network.bar_transition_prior.probabilities_dict()}")
 
     # Apply break mode config from CLI args
     if args.break_mode:
@@ -430,21 +432,10 @@ if __name__ == '__main__':
         actual_bar = int(true_position[3])
         new_page = int(true_position[-1])
 
-        # ── State reset on page change ───────────────────────────────
+        # Candidate indices are page-local, so reset only the committed
+        # position. Preserve audio/Mamba and break context across the turn.
         if actual_page != new_page:
-            hidden = None
-            if hasattr(cond_net, 'reset_inference_state'):
-                cond_net.reset_inference_state()
-            network.reset_tracking_state()
-            audio_buffer.clear()
-
-        # ── State reset at jump points (silence onset) ───────────────
-        if is_at_jump:
-            hidden = None
-            if hasattr(cond_net, 'reset_inference_state'):
-                cond_net.reset_inference_state()
-            network.reset_tracking_state()
-            audio_buffer.clear()
+            network.reset_tracking_state(reset_break_mode=False)
 
         actual_page = new_page
         system = systems[actual_system]

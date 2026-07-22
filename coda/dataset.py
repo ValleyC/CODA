@@ -9,9 +9,10 @@ import numpy as np
 
 
 from coda.utils.data_utils import load_sequences, SAMPLE_RATE, FPS, FRAME_SIZE, HOP_SIZE
-from coda.utils.general import load_wav, load_yaml
+from coda.utils.general import load_wav_segment, load_yaml
 from coda.augmentations.impulse_response import ImpulseResponse
 
+from collections.abc import Mapping
 from multiprocessing import get_context
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -34,6 +35,121 @@ JUMP_SILENCE_MIN_FRAMES = 3
 JUMP_SILENCE_MAX_FRAMES = 12
 JUMP_POST_SILENCE_MIN_FRAMES = 1
 JUMP_POST_SILENCE_MAX_FRAMES = 8
+
+
+# A training split contains close to one million frame records. Keeping each
+# record as a Python dict with several small NumPy arrays costs multiple GiB.
+# These are all fixed-shape numeric fields, so store them column-wise while
+# exposing the same read-only Mapping interface expected by SequenceDataset.
+_SEQUENCE_SCHEMA = {
+    'piece_id': (np.int32, (), 0),
+    'is_onset': (np.bool_, (), False),
+    'start_frame': (np.int32, (), 0),
+    'frame': (np.int32, (), 0),
+    'max_x_shift': (np.int32, (2,), (0, 0)),
+    'max_y_shift': (np.int32, (2,), (0, 0)),
+    'true_position': (np.int32, (5,), (0, 0, 0, 0, 0)),
+    'true_system': (np.float32, (4,), (0, 0, 0, 0)),
+    'true_bar': (np.float32, (4,), (0, 0, 0, 0)),
+    'height': (np.float32, (), 0.0),
+    'synthesized': (np.bool_, (), False),
+    'is_silence': (np.bool_, (), False),
+    'scale_factor': (np.float64, (), 1.0),
+    'gt_system_page_idx': (np.int32, (), 0),
+    'gt_bar_in_system_idx': (np.int32, (), 0),
+    'gt_valid': (np.bool_, (), True),
+    'prev_gt_system_page_idx': (np.int32, (), -1),
+    'prev_gt_bar_page_idx': (np.int32, (), -1),
+}
+
+
+class _SequenceView(Mapping):
+    """Mapping view over one row of a CompactSequenceStore."""
+
+    __slots__ = ('_store', '_index')
+
+    def __init__(self, store, index):
+        self._store = store
+        self._index = index
+
+    def __getitem__(self, key):
+        value = self._store.columns[key][self._index]
+        return value.item() if isinstance(value, np.generic) else value
+
+    def __iter__(self):
+        return iter(self._store.columns)
+
+    def __len__(self):
+        return len(self._store.columns)
+
+
+class CompactSequenceStore:
+    """Fixed-schema, columnar storage with dict-compatible row access."""
+
+    def __init__(self, columns=None):
+        self.columns = columns or {
+            name: np.empty((0,) + shape, dtype=dtype)
+            for name, (dtype, shape, _) in _SEQUENCE_SCHEMA.items()
+        }
+        lengths = {len(column) for column in self.columns.values()}
+        if len(lengths) > 1:
+            raise ValueError(f'Compact sequence columns have unequal lengths: {lengths}')
+        self.length = lengths.pop() if lengths else 0
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        if not isinstance(index, (int, np.integer)):
+            raise TypeError('CompactSequenceStore indices must be integers')
+        index = int(index)
+        if index < 0:
+            index += self.length
+        if index < 0 or index >= self.length:
+            raise IndexError(index)
+        return _SequenceView(self, index)
+
+    @property
+    def nbytes(self):
+        return sum(column.nbytes for column in self.columns.values())
+
+
+class _CompactSequenceBuilder:
+    """Incrementally compact piece-sized batches without retaining raw dicts."""
+
+    def __init__(self):
+        self._chunks = {name: [] for name in _SEQUENCE_SCHEMA}
+        self.length = 0
+
+    def add(self, sequences):
+        if not sequences:
+            return
+        for name, (dtype, shape, default) in _SEQUENCE_SCHEMA.items():
+            values = [sequence.get(name, default) for sequence in sequences]
+            column = np.asarray(values, dtype=dtype)
+            expected_shape = (len(sequences),) + shape
+            if column.shape != expected_shape:
+                raise ValueError(
+                    f'Invalid sequence field {name!r}: expected shape '
+                    f'{expected_shape}, got {column.shape}'
+                )
+            self._chunks[name].append(column)
+        self.length += len(sequences)
+
+    def finish(self):
+        columns = {}
+        for name, (dtype, shape, _) in _SEQUENCE_SCHEMA.items():
+            chunks = self._chunks[name]
+            columns[name] = (
+                np.concatenate(chunks, axis=0)
+                if chunks else np.empty((0,) + shape, dtype=dtype)
+            )
+        store = CompactSequenceStore(columns)
+        if len(store) != self.length:
+            raise RuntimeError(
+                f'Compacted {len(store)} sequences, expected {self.length}'
+            )
+        return store
 
 
 def nearest_interp(x, interpol_data):
@@ -271,7 +387,8 @@ class SequenceDataset(Dataset):
                         dest_indices = system_map[adj]
                         break
 
-        # Fallback: random different system (covers 'random' type + failed typed samples)
+        # Use the remaining systems when the requested jump type has no
+        # admissible destination for this source frame.
         if dest_indices is None:
             all_indices = []
             for key, indices in system_map.items():
@@ -360,10 +477,6 @@ class SequenceDataset(Dataset):
 
         signal = self.performances[piece_id]
 
-        # if signal is provided as a path it should be loaded from the disk
-        if isinstance(signal, str):
-            signal = load_wav(signal, SAMPLE_RATE)
-
         start_frame = int(seq['start_frame'])
         frame = int(seq['frame'])
         scale_factor = seq['scale_factor']
@@ -385,7 +498,17 @@ class SequenceDataset(Dataset):
         start_t = int(start_frame * self.hop_length)
         t = self.frame_size + int(frame * self.hop_length)
 
-        truncated_signal = signal[start_t:t]
+        # The encoder never consumes more than two minutes. When audio is kept
+        # as a path, seek directly to that bounded interval instead of loading
+        # and decoding the complete WAV once for every training sample.
+        max_audio_samples = 120 * self.sample_rate
+        effective_start_t = max(start_t, t - max_audio_samples)
+        if isinstance(signal, str):
+            truncated_signal = load_wav_segment(
+                signal, effective_start_t, t, self.sample_rate
+            )
+        else:
+            truncated_signal = signal[effective_start_t:t]
 
         # Insert silence gap before jump destination audio
         # Simulates the pause when a performer jumps to a new location
@@ -505,8 +628,8 @@ class SelectionCustomBatch:
         self.prev_gt_system_idx = torch.LongTensor([x.get('prev_gt_system_page_idx', -1) for x in batch])
         self.prev_gt_bar_page_idx = torch.LongTensor([x.get('prev_gt_bar_page_idx', -1) for x in batch])
 
-        # gt_valid: all True since invalid samples are filtered at load time.
-        # Passed through to loss for defensive masking of edge cases.
+        # Samples are validated before collation; the explicit mask is part of
+        # the loss interface and supports composition with routing masks.
         self.gt_valid = torch.ones(len(batch), dtype=torch.bool)
 
         # GT note position (bar-local, for note regression loss)
@@ -514,7 +637,7 @@ class SelectionCustomBatch:
             np.stack([x['gt_note_bar_local'] for x in batch]), dtype=torch.float32
         )
 
-        # Original targets (for backward compatibility with eval)
+        # Frame targets consumed by visualization and evaluation utilities.
         targets = []
         unscaled_targets = []
         for i, x in enumerate(batch):
@@ -539,6 +662,8 @@ class SelectionCustomBatch:
     def pin_memory(self):
         self.scores = self.scores.pin_memory()
         self.perf = [p.pin_memory() for p in self.perf]
+        self.system_boxes = [boxes.pin_memory() for boxes in self.system_boxes]
+        self.bar_boxes = [boxes.pin_memory() for boxes in self.bar_boxes]
         self.gt_system_idx = self.gt_system_idx.pin_memory()
         self.gt_bar_in_sys = self.gt_bar_in_sys.pin_memory()
         self.gt_note_position = self.gt_note_position.pin_memory()
@@ -646,7 +771,7 @@ def load_dataset(paths, augment=False, scale_width=416, split_files=None, ir_pat
 
     scores = {}
     piece_names = {}
-    all_sequences = []
+    sequence_builder = _CompactSequenceBuilder()
     total_invalid = 0
     performances = {}
     interpol_c2os = {}
@@ -665,6 +790,10 @@ def load_dataset(paths, augment=False, scale_width=416, split_files=None, ir_pat
     else:
         for path in paths:
             files.extend(glob.glob(os.path.join(path, '*.npz')))
+
+    # Directory enumeration order is filesystem-dependent. Stable piece IDs
+    # keep epoch-seeded sampling and resume behavior reproducible.
+    files.sort()
 
     # Phase 1: Identify audio sources for all files to enable score/audio deduplication
     # This dramatically reduces memory for jump-augmented datasets
@@ -741,12 +870,20 @@ def load_dataset(paths, augment=False, scale_width=416, split_files=None, ir_pat
     mp_start = os.getenv("CODA_DATASET_START_METHOD", "spawn")
     mp_workers = int(os.getenv("CODA_DATASET_WORKERS", "8"))
 
-    if mp_workers <= 0:
-        # Sequential loading (safest, use if parallel still hangs)
-        results = [load_sequences(p) for p in tqdm(params)]
-    else:
+    # Keep the result iterator lazy: materializing it retains every per-frame
+    # Python dictionary in the parent until the full split has loaded.
+    def iter_loaded_results():
+        if mp_workers <= 0:
+            yield from tqdm(map(load_sequences, params), total=len(params))
+            return
+        # The context terminates workers if loading or compaction raises, so a
+        # failed preload cannot leave multi-GiB orphan processes behind.
         with get_context(mp_start).Pool(mp_workers) as pool:
-            results = list(tqdm(pool.imap_unordered(load_sequences, params), total=len(params)))
+            yield from tqdm(
+                pool.imap_unordered(load_sequences, params), total=len(params)
+            )
+
+    results = iter_loaded_results()
 
     # Phase 2: Process results with score deduplication
     # Non-primary files return None for scores/audio/interpol (lightweight mode)
@@ -772,17 +909,19 @@ def load_dataset(paths, augment=False, scale_width=416, split_files=None, ir_pat
 
         # Sequences already have piece_id pointing to source_idx (set in load_sequences)
         # Filter by onset and gt_valid — invalid GT samples excluded at load time
-        n_before = len(all_sequences)
-        for seq in sequences:
-            if only_onsets and not seq['is_onset']:
-                continue
-            if not seq.get('gt_valid', True):
-                continue
-            all_sequences.append(seq)
-        n_added = len(all_sequences) - n_before
-        n_invalid = len(sequences) - n_added
-        if n_invalid > 0:
-            total_invalid += n_invalid
+        valid_sequences = [
+            seq for seq in sequences
+            if (not only_onsets or seq['is_onset'])
+            and seq.get('gt_valid', True)
+        ]
+        sequence_builder.add(valid_sequences)
+        total_invalid += len(sequences) - len(valid_sequences)
+
+    all_sequences = sequence_builder.finish()
+    print(
+        f'[Dataset] Compacted {len(all_sequences):,} frame records into '
+        f'{all_sequences.nbytes / (1024 ** 2):.1f} MiB'
+    )
 
     if total_invalid > 0:
         print(f'[Dataset] Filtered {total_invalid} samples with invalid GT labels '

@@ -49,12 +49,20 @@ Alternatively, generate it from the base MSMD test set:
 python scripts/generate_repeat_test.py \
     --input_dir data/msmd/msmd_test \
     --output_dir data/msmd/msmd_test_jump \
-    --annotations data/repeat_annotations.json
+    --annotations data/repeat_annotations.json \
+    --seed 42 \
+    --clean_output
 ```
 
 This produces two subsets:
 - `repeat/` — pieces with written repeats, jumps follow annotated performance order
-- `random/` — pieces without repeats, random jumps inserted
+- `random/` — pieces without repeats, seeded pseudo-random jumps inserted
+
+The annotated performance orders are fixed. Random examples use stable
+per-piece seeds derived from `--seed`, so generation is independent of file
+enumeration order. The generated manifest records the exact piece lists,
+per-piece seeds, and artifact hashes. `--clean_output` removes stale generated
+audio and metadata files from these two subsets before rebuilding them.
 
 ### Repeat Annotations (`repeat_annotations.json`)
 
