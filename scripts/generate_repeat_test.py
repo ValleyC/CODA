@@ -38,6 +38,15 @@ from generate_jump_test_data import (
 )
 
 
+def sha256_file(path: str) -> str:
+    """Return the SHA-256 digest of a file without loading it into memory."""
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def build_bar_frame_ranges(n_frames: int, interpol_fnc) -> Dict[int, Tuple[int, int]]:
     """Map each bar_idx to its (start_frame, end_frame) range."""
     bar_frames = {}
@@ -413,27 +422,6 @@ def main():
     print(f"  Random subset: {n_random} pieces -> {random_dir}")
     print(f"  Skipped: {n_skipped}")
 
-    # Save manifest
-    manifest = {
-        'repeat_pieces': n_repeat,
-        'random_pieces': n_random,
-        'repeat_silence_frames': args.repeat_silence_frames,
-        'random_min_jumps': args.min_jumps,
-        'random_min_gap_sec': args.min_gap_sec,
-        'seed': args.seed,
-        'annotation_sha256': annotation_sha256,
-        'repeat_piece_names': repeat_piece_names,
-        'random_piece_names': random_piece_names,
-        'random_piece_seeds': {
-            name: stable_named_seed(args.seed, name)
-            for name in random_piece_names
-        },
-    }
-    manifest_path = os.path.join(args.output_dir, 'manifest.json')
-    with open(manifest_path, 'w') as f:
-        json.dump(manifest, f, indent=2)
-    print(f"  Manifest: {manifest_path}")
-
     if not args.piece_name:
         expected_repeat = [
             name for name in piece_names
@@ -449,11 +437,47 @@ def main():
                 or random_piece_names != expected_random
                 or n_skipped != 0):
             raise RuntimeError(
-                "Benchmark generation was incomplete; refusing to accept a "
-                f"partial manifest (repeat {n_repeat}/{len(expected_repeat)}, "
+                "Benchmark generation was incomplete; refusing to write a "
+                f"manifest (repeat {n_repeat}/{len(expected_repeat)}, "
                 f"random {n_random}/{len(expected_random)}, skipped {n_skipped})"
             )
 
+    artifact_paths = {}
+    for subset, names in (
+            ('repeat', repeat_piece_names), ('random', random_piece_names)):
+        for name in names:
+            for extension in ('.npz', '.wav'):
+                relative_path = f'{subset}/{name}{extension}'
+                absolute_path = os.path.join(args.output_dir, *relative_path.split('/'))
+                if not os.path.isfile(absolute_path):
+                    raise RuntimeError(f'Missing generated artifact: {relative_path}')
+                artifact_paths[relative_path] = {
+                    'bytes': os.path.getsize(absolute_path),
+                    'sha256': sha256_file(absolute_path),
+                }
+
+    # Save manifest only after a complete output has been verified.
+    manifest = {
+        'format_version': 1,
+        'repeat_pieces': n_repeat,
+        'random_pieces': n_random,
+        'repeat_silence_frames': args.repeat_silence_frames,
+        'random_min_jumps': args.min_jumps,
+        'random_min_gap_sec': args.min_gap_sec,
+        'seed': args.seed,
+        'annotation_sha256': annotation_sha256,
+        'repeat_piece_names': repeat_piece_names,
+        'random_piece_names': random_piece_names,
+        'random_piece_seeds': {
+            name: stable_named_seed(args.seed, name)
+            for name in random_piece_names
+        },
+        'artifacts': artifact_paths,
+    }
+    manifest_path = os.path.join(args.output_dir, 'manifest.json')
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
+    print(f"  Manifest: {manifest_path}")
 
 if __name__ == '__main__':
     main()

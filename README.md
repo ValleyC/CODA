@@ -70,12 +70,15 @@ data/
 
 ### Repeat-Aware Jump-Augmented Test Set
 
-Download the [pre-built jump-augmented test set](https://drive.google.com/file/d/12hDvbjYfrRLACsh45mQaOA4tiFcIobTo/view?usp=sharing) directly:
+Download the [official CODA JumpBench v1.0.0 release](https://huggingface.co/datasets/ValleyC/CODA-JumpBench) from Hugging Face:
 ```bash
-pip install gdown
-gdown https://drive.google.com/uc?id=12hDvbjYfrRLACsh45mQaOA4tiFcIobTo -O data/msmd_test_jump.zip
-unzip data/msmd_test_jump.zip -d data/msmd/
+python -m pip install -U huggingface_hub
+hf download ValleyC/CODA-JumpBench CODA_JumpBench_v1.0.0.zip \
+    --repo-type dataset --local-dir data
+unzip data/CODA_JumpBench_v1.0.0.zip -d data/msmd/
 ```
+
+The archive SHA-256 is `91f1acaffd29391065fee44efb021bcad0f69004a53c7a35b628ee2b6a5364b9`.
 
 Alternatively, generate it from the base MSMD test set:
 ```bash
